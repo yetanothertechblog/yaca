@@ -43,6 +43,10 @@ type CompactResultMsg struct {
 	Err     error
 }
 
+type InterruptMsg struct {
+	Reason string
+}
+
 type PermissionDecision int
 
 const (
@@ -53,7 +57,7 @@ const (
 
 // Cmd factories
 
-func callLLM(a *agent.Agent, history []llm.Message) tea.Cmd {
+func callLLMInterruptible(a *agent.Agent, history []llm.Message, interruptCh <-chan struct{}) tea.Cmd {
 	messages := make([]llm.Message, 0, len(history)+1)
 	messages = append(messages, llm.Message{
 		Role:    "system",
@@ -101,10 +105,10 @@ func callLLM(a *agent.Agent, history []llm.Message) tea.Cmd {
 		}
 	}()
 
-	return waitForStream(ch)
+	return waitForStreamInterruptible(ch, interruptCh)
 }
 
-func waitForStream(ch <-chan tea.Msg) tea.Cmd {
+func waitForStreamInterruptible(ch <-chan tea.Msg, interruptCh <-chan struct{}) tea.Cmd {
 	return func() tea.Msg {
 		time.Sleep(100 * time.Millisecond)
 		var latest tea.Msg
@@ -118,15 +122,21 @@ func waitForStream(ch <-chan tea.Msg) tea.Cmd {
 				if _, isToken := msg.(StreamTokenCountMsg); !isToken {
 					return msg
 				}
+			case <-interruptCh:
+				return InterruptMsg{Reason: "User interrupted"}
 			default:
 				if latest != nil {
 					return latest
 				}
-				msg, ok := <-ch
-				if !ok {
-					return nil
+				select {
+				case msg, ok := <-ch:
+					if !ok {
+						return nil
+					}
+					return msg
+				case <-interruptCh:
+					return InterruptMsg{Reason: "User interrupted"}
 				}
-				return msg
 			}
 		}
 	}
@@ -164,29 +174,43 @@ func compactHistory(history []llm.Message) tea.Cmd {
 	}
 }
 
-func executeTool(a *agent.Agent, tc llm.ToolCall) tea.Cmd {
+func executeToolInterruptible(a *agent.Agent, tc llm.ToolCall, interruptCh <-chan struct{}) tea.Cmd {
 	name := tc.Function.Name
 	args := tc.Function.Arguments
 	id := tc.ID
 
 	return func() tea.Msg {
-		result, err := a.ExecuteTool(name, args)
-		if err != nil {
-			log.Printf("tool error: %v", err)
-			return ToolResultMsg{
+		done := make(chan tea.Msg, 1)
+		go func() {
+			result, err := a.ExecuteTool(name, args)
+			if err != nil {
+				log.Printf("tool error: %v", err)
+				done <- ToolResultMsg{
+					ToolCallID: id,
+					ToolName:   name,
+					Args:       args,
+					Result:     err.Error(),
+					Err:        err,
+				}
+				return
+			}
+			log.Printf("tool result: %.200s", result.Output)
+			done <- ToolResultMsg{
 				ToolCallID: id,
 				ToolName:   name,
 				Args:       args,
-				Result:     err.Error(),
-				Err:        err,
+				Result:     result.Output,
 			}
+		}()
+
+		if interruptCh == nil {
+			return <-done
 		}
-		log.Printf("tool result: %.200s", result.Output)
-		return ToolResultMsg{
-			ToolCallID: id,
-			ToolName:   name,
-			Args:       args,
-			Result:     result.Output,
+		select {
+		case msg := <-done:
+			return msg
+		case <-interruptCh:
+			return InterruptMsg{Reason: "Operation interrupted by user"}
 		}
 	}
 }

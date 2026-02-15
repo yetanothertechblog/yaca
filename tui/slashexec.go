@@ -21,10 +21,7 @@ func (m *Model) executeSlashCommand(text string) (bool, tea.Cmd) {
 		return true, nil
 	case "/compact":
 		if len(m.history) == 0 {
-			m.messages = append(m.messages, ChatEntry{
-				Type:    EntryError,
-				Content: "Nothing to compact",
-			})
+			m.appendError("Nothing to compact")
 			m.refreshViewport()
 			return true, nil
 		}
@@ -34,10 +31,7 @@ func (m *Model) executeSlashCommand(text string) (bool, tea.Cmd) {
 	case "/rewind":
 		return m.executeRewind()
 	case "/help", "/status":
-		m.messages = append(m.messages, ChatEntry{
-			Type:    EntryError,
-			Content: "Command not yet implemented",
-		})
+		m.appendError("Command not yet implemented")
 		m.refreshViewport()
 		return true, nil
 	default:
@@ -81,10 +75,7 @@ func (m *Model) executeRewind() (bool, tea.Cmd) {
 	}
 
 	if len(items) == 0 {
-		m.messages = append(m.messages, ChatEntry{
-			Type:    EntryError,
-			Content: "Nothing to rewind",
-		})
+		m.appendError("Nothing to rewind")
 		m.refreshViewport()
 		return true, nil
 	}

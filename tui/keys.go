@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"go-tui/llm"
 	"go-tui/tui/slashcmd"
@@ -13,6 +14,21 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
+	}
+
+	// Handle double ESC for interrupting long-running operations
+	if msg.Type == tea.KeyEsc {
+		now := time.Now()
+		if now.Sub(m.lastEscTime) < 500*time.Millisecond {
+			if m.waiting && m.interruptCh != nil {
+				close(m.interruptCh)
+				m.interruptCh = nil
+				m.lastEscTime = time.Time{}
+				return m, nil
+			}
+		}
+		m.lastEscTime = now
+		return m, nil
 	}
 
 	// Permission prompt mode
@@ -73,10 +89,11 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 		m.waiting = true
 		m.toolRoundCount = 0
 		m.consecutiveErrors = 0
+		m.interruptCh = make(chan struct{})
 
 		m.refreshViewport()
 
-		return m, callLLM(m.agent, m.history)
+		return m, callLLMInterruptible(m.agent, m.history, m.interruptCh)
 	}
 
 	if m.waiting {
@@ -239,11 +256,11 @@ func handlePermissionKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 
 		switch cursor {
 		case 0: // Allow
-			return m, executeTool(m.agent, *tc)
+			return m, executeToolInterruptible(m.agent, *tc, m.interruptCh)
 
 		case 1: // Always Allow
 			m.alwaysAllow[tc.Function.Name] = true
-			return m, executeTool(m.agent, *tc)
+			return m, executeToolInterruptible(m.agent, *tc, m.interruptCh)
 
 		case 2: // Deny
 			command := tc.Function.Name + ": " + tc.Function.Arguments

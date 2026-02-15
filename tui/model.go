@@ -46,6 +46,7 @@ type ChatEntry struct {
 	Result  string    `json:"result,omitempty"`
 	Denied  bool      `json:"denied,omitempty"`
 	Diff    *DiffData `json:"diff,omitempty"`
+	Error   string    `json:"error,omitempty"`
 }
 
 const maxToolRounds = config.MaxToolRounds
@@ -78,6 +79,8 @@ type Model struct {
 	streamingThinking  bool
 	slashOverlay       *slashcmd.Overlay
 	rewindOverlay      *slashcmd.RewindOverlay
+	interruptCh        chan struct{}
+	lastEscTime        time.Time
 }
 
 // separatorStyle and statusStyle are defined in theme.go
@@ -151,6 +154,21 @@ func (m *Model) saveConversation() {
 	m.conv.AgentHistory = histJSON
 	if err := m.conv.Save(m.convDir); err != nil {
 		log.Printf("failed to save conversation: %v", err)
+	}
+}
+
+// appendError attaches an error message to the last chat entry as an indented block,
+// or creates a standalone entry if there are no previous messages.
+func (m *Model) appendError(errMsg string) {
+	if len(m.messages) > 0 {
+		m.messages[len(m.messages)-1].Error = errMsg
+	} else {
+		m.messages = append(m.messages, ChatEntry{
+			Type:    EntryMessage,
+			Role:    "assistant",
+			Content: "",
+			Error:   errMsg,
+		})
 	}
 }
 
@@ -276,22 +294,19 @@ func (m *Model) dispatchNextTool() tea.Cmd {
 		if m.toolRoundCount >= maxToolRounds {
 			m.waiting = false
 			m.textarea.Focus()
-			m.messages = append(m.messages, ChatEntry{
-				Type:    EntryError,
-				Content: "Tool call limit reached",
-			})
+			m.appendError("Tool call limit reached")
 			m.saveConversation()
 			m.refreshViewport()
 			return nil
 		}
 		// Start next LLM round
-		return callLLM(m.agent, m.history)
+		return callLLMInterruptible(m.agent, m.history, m.interruptCh)
 	}
 
 	tc := m.pendingToolCalls[m.pendingToolIndex]
 
 	if m.alwaysAllow[tc.Function.Name] {
-		return executeTool(m.agent, tc)
+		return executeToolInterruptible(m.agent, tc, m.interruptCh)
 	}
 
 	// Need permission
@@ -348,7 +363,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StreamTokenCountMsg:
 		m.streamingTokens = msg.Count
 		m.streamingThinking = msg.Thinking
-		return m, waitForStream(msg.ch)
+		return m, waitForStreamInterruptible(msg.ch, m.interruptCh)
 
 	case LLMResponseMsg:
 		m.streamingTokens = 0
@@ -359,10 +374,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Err != nil {
 			m.waiting = false
 			m.textarea.Focus()
-			m.messages = append(m.messages, ChatEntry{
-				Type:    EntryError,
-				Content: msg.Err.Error(),
-			})
+			m.appendError(msg.Err.Error())
 			m.saveConversation()
 			m.refreshViewport()
 			return m, nil
@@ -417,10 +429,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.waiting = false
 		m.textarea.Focus()
 		if msg.Err != nil {
-			m.messages = append(m.messages, ChatEntry{
-				Type:    EntryError,
-				Content: "Compact failed: " + msg.Err.Error(),
-			})
+			m.appendError("Compact failed: " + msg.Err.Error())
 			m.refreshViewport()
 			return m, nil
 		}
@@ -488,6 +497,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmd := m.dispatchNextTool()
 		return m, cmd
 
+	case InterruptMsg:
+		m.waiting = false
+		m.textarea.Focus()
+		m.appendError(msg.Reason)
+		m.saveConversation()
+		m.refreshViewport()
+		return m, nil
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -551,9 +568,9 @@ func (m *Model) renderStatusLine() string {
 			if m.streamingThinking {
 				thinkingStr = " · ( thinking )"
 			}
-			left = m.spinner.View() + fmt.Sprintf(" Processing · ⬇ %d tokens%s", m.streamingTokens, thinkingStr)
+			left = m.spinner.View() + fmt.Sprintf(" Processing · ⬇ %d tokens%s (Double ESC to interrupt)", m.streamingTokens, thinkingStr)
 		} else {
-			left = m.spinner.View() + " Processing"
+			left = m.spinner.View() + " Processing (Double ESC to interrupt)"
 		}
 	}
 

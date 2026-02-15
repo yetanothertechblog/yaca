@@ -46,9 +46,10 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md 
 
 		case EntryMessage:
 			rendered = renderMessageEntry(entry, md)
+		}
 
-		case EntryError:
-			rendered = errorStyle.Render("Error: " + entry.Content)
+		if entry.Error != "" {
+			rendered += "\n" + indentBlock(errorStyle.Render(entry.Error))
 		}
 
 		rendered = strings.Trim(rendered, "\n")
