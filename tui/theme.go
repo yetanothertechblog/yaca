@@ -49,17 +49,19 @@ var (
 
 	// Diffs
 	diffAddedStyle = lipgloss.NewStyle().
-			Foreground(colorPatina)
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#2D5A27"))
 
 	diffRemovedStyle = lipgloss.NewStyle().
-				Foreground(colorRust)
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Background(lipgloss.Color("#6B1A1A"))
 
 	diffHeaderStyle = lipgloss.NewStyle().
 			Foreground(colorBrass).
 			Bold(true)
 
 	diffHunkStyle = lipgloss.NewStyle().
-			Foreground(colorDimBrass)
+			Foreground(lipgloss.Color("#FFFFFF"))
 
 	diffLineNumStyle = lipgloss.NewStyle().
 				Foreground(colorForgedIron)

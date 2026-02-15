@@ -57,15 +57,15 @@ func renderGroupedToolCalls(group []ChatEntry) string {
 
 	header := toolBulletStyle.Render("⏺ ") + toolCmdStyle.Render(strings.Join(parts, ", "))
 
-	// Show first 3 tool call titles indented
+	// Show last 3 tool call titles indented
 	maxShown := 3
 	var titles []string
-	for i, entry := range group {
-		if i >= maxShown {
+	for i := len(group) - 1; i >= 0; i-- {
+		if len(group)-i > maxShown {
 			titles = append(titles, fmt.Sprintf("...%d more", len(group)-maxShown))
 			break
 		}
-		titles = append(titles, formatCommand(entry.Command))
+		titles = append(titles, formatCommand(group[i].Command))
 	}
 
 	return header + "\n" + indentBlock(strings.Join(titles, "\n"))

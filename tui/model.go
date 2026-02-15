@@ -31,10 +31,11 @@ const (
 )
 
 type DiffData struct {
-	FilePath  string `json:"file_path"`
-	OldText   string `json:"old_text"`
-	NewText   string `json:"new_text"`
-	StartLine int    `json:"start_line,omitempty"`
+	FilePath     string `json:"file_path"`
+	OldText      string `json:"old_text"`
+	NewText      string `json:"new_text"`
+	StartLine    int    `json:"start_line,omitempty"`
+	BlockReplace bool   `json:"block_replace,omitempty"` // true for edit_file: show as block replacement
 }
 
 type ChatEntry struct {
@@ -188,10 +189,11 @@ func parseDiffFromToolCall(toolName, args, result, workingDir string, denied boo
 			}
 		}
 		return &DiffData{
-			FilePath:  r.FilePath,
-			OldText:   old,
-			NewText:   new_,
-			StartLine: startLine,
+			FilePath:     r.FilePath,
+			OldText:      old,
+			NewText:      new_,
+			StartLine:    startLine,
+			BlockReplace: toolName == "edit_file",
 		}
 	}
 	return nil
@@ -217,10 +219,11 @@ func parseDiffFromArgs(name, argsJSON, workingDir string) *DiffData {
 			startLine = findStartLine(string(data), args.OldString)
 		}
 		return &DiffData{
-			FilePath:  args.FilePath,
-			OldText:   args.OldString,
-			NewText:   args.NewString,
-			StartLine: startLine,
+			FilePath:     args.FilePath,
+			OldText:      args.OldString,
+			NewText:      args.NewString,
+			StartLine:    startLine,
+			BlockReplace: true,
 		}
 
 	case "write_file":
@@ -373,11 +376,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Role:    "assistant",
 				Content: msg.Content,
 			})
-			m.messages = append(m.messages, ChatEntry{
-				Type:    EntryMessage,
-				Role:    "assistant",
-				Content: msg.Content,
-			})
+			if strings.TrimSpace(msg.Content) != "" {
+				m.messages = append(m.messages, ChatEntry{
+					Type:    EntryMessage,
+					Role:    "assistant",
+					Content: msg.Content,
+				})
+			}
 			m.saveConversation()
 			m.refreshViewport()
 			return m, nil
@@ -390,8 +395,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ToolCalls: msg.ToolCalls,
 		})
 
-		// If there's content alongside tool calls, show it (fixes dropped-content bug)
-		if msg.Content != "" {
+		// If there's meaningful content alongside tool calls, show it
+		if strings.TrimSpace(msg.Content) != "" {
 			m.messages = append(m.messages, ChatEntry{
 				Type:    EntryMessage,
 				Role:    "assistant",
@@ -442,6 +447,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ToolResultMsg:
 		command := msg.ToolName + ": " + msg.Args
 		resultStr := msg.Result
+
+		// Limit list_files output to 3 lines for display
+		if msg.ToolName == "list_files" {
+			lines := strings.Split(msg.Result, "\n")
+			if len(lines) > 4 { // 3 lines + empty line
+				resultStr = strings.Join(lines[:4], "\n") + "\n... (showing first 3 entries)"
+			}
+		}
 
 		if msg.Err != nil {
 			m.consecutiveErrors++
