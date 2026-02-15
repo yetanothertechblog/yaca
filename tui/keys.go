@@ -30,6 +30,16 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 		return handleSlashOverlayKey(m, msg)
 	}
 
+	// Handle scrolling keys before textarea consumes them (works during waiting too)
+	switch msg.Type {
+	case tea.KeyPgUp:
+		m.viewport.ViewUp()
+		return m, nil
+	case tea.KeyPgDown:
+		m.viewport.ViewDown()
+		return m, nil
+	}
+
 	switch msg.Type {
 	case tea.KeyEnter:
 		if m.waiting {
@@ -73,14 +83,20 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Handle scrolling keys before textarea consumes them
-	switch msg.Type {
-	case tea.KeyPgUp:
-		m.viewport.ViewUp()
-		return m, nil
-	case tea.KeyPgDown:
-		m.viewport.ViewDown()
-		return m, nil
+	// Drop leaked CSI mouse sequence fragments (e.g. "[<64;32;32M", "<64;32;32M",
+	// "32;32M") that arrive as KeyRunes when bubbletea's mouse parser doesn't
+	// fully consume them during rapid scrolling.
+	if msg.Type == tea.KeyRunes && len(msg.Runes) > 1 {
+		isMouse := true
+		for _, r := range msg.Runes {
+			if !((r >= '0' && r <= '9') || r == ';' || r == '[' || r == '<' || r == '>' || r == 'M' || r == 'm') {
+				isMouse = false
+				break
+			}
+		}
+		if isMouse {
+			return m, nil
+		}
 	}
 
 	var cmd tea.Cmd

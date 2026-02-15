@@ -32,8 +32,8 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md 
 			groupEnd := findGroupEnd(messages, i)
 			if groupEnd > i {
 				rendered = renderGroupedToolCalls(messages[i : groupEnd+1])
-				rendered = strings.TrimSpace(rendered)
-				sb.WriteString(rendered)
+				rendered = strings.Trim(rendered, "\n")
+				sb.WriteString(rendered + "\n\n")
 				i = groupEnd + 1
 				continue
 			}
@@ -45,39 +45,14 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md 
 			rendered = renderToolCallEntry(entry)
 
 		case EntryMessage:
-			switch entry.Role {
-			case "user":
-				rendered = userMessageStyle.Render(entry.Content)
-			case "assistant":
-				if md != nil && isMarkdown(entry.Content) {
-					if r, err := md.Render(entry.Content); err == nil {
-						rendered = r
-					} else {
-						rendered = entry.Content
-					}
-				} else {
-					rendered = entry.Content
-				}
-			default:
-				rendered = fmt.Sprintf("%s: %s", entry.Role, entry.Content)
-			}
+			rendered = renderMessageEntry(entry, md)
 
 		case EntryError:
 			rendered = errorStyle.Render("Error: " + entry.Content)
 		}
 
 		rendered = strings.Trim(rendered, "\n")
-
-		// Extra blank line before user/assistant messages to separate conversation turns
-		if entry.Type == EntryMessage && (entry.Role == "user" || entry.Role == "assistant") && sb.Len() > 0 {
-			sb.WriteString("\n")
-		}
-		sb.WriteString(rendered)
-		if entry.Type != EntryToolCall {
-			sb.WriteString("\n")
-		}
-
-		// prevType = entry.Type
+		sb.WriteString(rendered + "\n\n")
 
 		i++
 	}
@@ -107,19 +82,45 @@ func renderToolCallEntry(entry ChatEntry) string {
 
 	name, _ := splitCommand(entry.Command)
 
-	// For read_file, just show the bullet header
-	if name == "read_file" {
+	switch name {
+	case "read_file":
 		return bullet
+	case "list_files", "bash":
+		result := entry.Result
+		lines := strings.Split(result, "\n")
+		if len(lines) > 3 {
+			result = strings.Join(lines[:3], "\n") + fmt.Sprintf("\n... (%d more lines)", len(lines)-3)
+		}
+		return bullet + "\n" + indentBlock(result)
+	default:
+		result := entry.Result
+		maxResultLines := config.MaxResultLines
+		lines := strings.Split(result, "\n")
+		if len(lines) > maxResultLines {
+			result = strings.Join(lines[:maxResultLines], "\n") + fmt.Sprintf("\n... (%d more lines)", len(lines)-maxResultLines)
+		}
+		return bullet + "\n" + indentBlock(result)
 	}
+}
 
-	// Default: show bullet + indented result
-	result := entry.Result
-	maxResultLines := config.MaxResultLines
-	lines := strings.Split(result, "\n")
-	if len(lines) > maxResultLines {
-		result = strings.Join(lines[:maxResultLines], "\n") + fmt.Sprintf("\n... (%d more lines)", len(lines)-maxResultLines)
+func renderMessageEntry(entry ChatEntry, md *MarkdownRenderer) string {
+	switch entry.Role {
+	case "user":
+		return userMessageStyle.Render("❯ " + entry.Content)
+	case "assistant":
+		return renderAssistantMessage(entry.Content, md)
+	default:
+		return fmt.Sprintf("%s: %s", entry.Role, entry.Content)
 	}
-	return bullet + "\n" + indentBlock(result)
+}
+
+func renderAssistantMessage(content string, md *MarkdownRenderer) string {
+	if md != nil && isMarkdown(content) {
+		if r, err := md.Render(content); err == nil {
+			return r
+		}
+	}
+	return content
 }
 
 // indentBlock renders content with ⎿ on the first line, then spaces for the rest.
@@ -129,13 +130,44 @@ func indentBlock(content string) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	bar := toolIndentStyle.Render("⎿ ")
-	pad := "  "
+	bar := toolIndentStyle.Render("   ⎿ ")
+	pad := "     "
 	out := bar + lines[0]
 	for _, line := range lines[1:] {
 		out += "\n" + pad + line
 	}
 	return out
+}
+
+// Helper functions for formatCommand
+func formatReadCommand(icon string, str func(string) string, num func(string) (int, bool)) string {
+	s := "Read: " + str("file_path")
+	offset, hasOffset := num("offset")
+	limit, hasLimit := num("limit")
+	if hasOffset && hasLimit {
+		s += fmt.Sprintf(" %d:%d", offset, offset+limit-1)
+	} else if hasOffset {
+		s += fmt.Sprintf(" from %d", offset)
+	} else if hasLimit {
+		s += fmt.Sprintf(" first %d lines", limit)
+	}
+	return icon + s
+}
+
+func formatListCommand(icon string, str func(string) string) string {
+	path := str("path")
+	if path == "" {
+		path = "."
+	}
+	return icon + "List: " + path
+}
+
+func formatSearchCommand(icon string, str func(string) string) string {
+	s := "Search: " + str("pattern")
+	if p := str("path"); p != "" {
+		s += " in " + p
+	}
+	return icon + s
 }
 
 // formatCommand turns "tool_name: {json}" into a human-readable string.
@@ -188,45 +220,23 @@ func formatCommand(command string) string {
 		icon = config.EditIcon
 	case "write_file":
 		icon = config.WriteIcon
-	case "beads":
-		icon = config.ToolIcon
 	default:
 		icon = config.ToolIcon
 	}
 
 	switch name {
 	case "read_file":
-		s := "Read: " + str("file_path")
-		offset, hasOffset := num("offset")
-		limit, hasLimit := num("limit")
-		if hasOffset && hasLimit {
-			s += fmt.Sprintf(" %d:%d", offset, offset+limit-1)
-		} else if hasOffset {
-			s += fmt.Sprintf(" from %d", offset)
-		} else if hasLimit {
-			s += fmt.Sprintf(" first %d lines", limit)
-		}
-		return icon + s
+		return formatReadCommand(icon, str, num)
 	case "list_files":
-		path := str("path")
-		if path == "" {
-			path = "."
-		}
-		return icon + "List: " + path
+		return formatListCommand(icon, str)
 	case "bash":
 		return icon + "Bash: " + str("command")
 	case "search":
-		s := "Search: " + str("pattern")
-		if p := str("path"); p != "" {
-			s += " in " + p
-		}
-		return icon + s
-	case "beads":
-		s := "Beads: " + str("command")
-		if a := str("args"); a != "" {
-			s += " " + a
-		}
-		return icon + s
+		return formatSearchCommand(icon, str)
+	case "edit_file":
+		return icon + "Edit: " + str("file_path")
+	case "write_file":
+		return icon + "Write: " + str("file_path")
 	default:
 		return icon + command
 	}
