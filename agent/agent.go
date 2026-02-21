@@ -2,6 +2,8 @@ package agent
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"go-tui/agent/tools"
 	"go-tui/llm"
@@ -11,6 +13,8 @@ import (
 const systemPromptTemplate = `You are an expert coding assistant with integrated LSP support. You help users write, debug, and improve code.
 
 Working directory: %s
+
+%s
 
 Rules:
 - ALWAYS explain code changes before making them. DO NOT JUST EDIT CODE
@@ -46,7 +50,16 @@ func (a *Agent) WorkingDir() string {
 }
 
 func (a *Agent) SystemPrompt() string {
-	return fmt.Sprintf(systemPromptTemplate, a.workingDir)
+	yacaContent := a.readYacaMarkdown()
+	return fmt.Sprintf(systemPromptTemplate, a.workingDir, yacaContent)
+}
+
+func (a *Agent) readYacaMarkdown() string {
+	yacaPath := filepath.Join(a.workingDir, "YACA.md")
+	if data, err := os.ReadFile(yacaPath); err == nil {
+		return string(data)
+	}
+	return ""
 }
 
 func (a *Agent) ExecuteTool(name, argsJSON string) (tools.ToolResult, error) {
