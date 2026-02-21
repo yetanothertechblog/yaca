@@ -505,6 +505,82 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 
+	case RewindToMessageMsg:
+		// Truncate messages and history to before the selected message
+		m.messages = m.messages[:msg.MessageIndex]
+		m.history = m.history[:msg.HistoryIndex]
+
+		// Populate textarea with the selected message text
+		m.textarea.SetValue(msg.FullText)
+
+		m.saveConversation()
+		m.refreshViewport()
+		return m, nil
+
+	case PermissionDecisionMsg:
+		switch msg.Decision {
+		case PermissionAllow:
+			return m, executeToolInterruptible(m.agent, msg.ToolCall, m.interruptCh)
+
+		case PermissionAlwaysAllow:
+			m.alwaysAllow[msg.ToolCall.Function.Name] = true
+			return m, executeToolInterruptible(m.agent, msg.ToolCall, m.interruptCh)
+
+		case PermissionDeny:
+			command := msg.ToolCall.Function.Name + ": " + msg.ToolCall.Function.Arguments
+			result := "Tool call denied by user."
+
+			// Append denial to history
+			m.history = append(m.history, llm.Message{
+				Role:       "tool",
+				Content:    result,
+				ToolCallID: msg.ToolCall.ID,
+			})
+
+			// Append denied tool call to UI messages
+			m.messages = append(m.messages, ChatEntry{
+				Type:    EntryToolCall,
+				Command: command,
+				Denied:  true,
+				Diff:    parseDiffFromToolCall(msg.ToolCall.Function.Name, msg.ToolCall.Function.Arguments, "", m.workingDir, true),
+			})
+
+			// Stop the loop — return to user input
+			m.pendingToolCalls = nil
+			m.pendingToolIndex = 0
+			m.waiting = false
+			m.textarea.Focus()
+			m.saveConversation()
+			m.refreshViewport()
+			return m, nil
+		}
+
+	case UserInputMsg:
+		text := msg.Text
+
+		m.messages = append(m.messages, ChatEntry{
+			Type:    EntryMessage,
+			Role:    "user",
+			Content: text,
+		})
+
+		// Append user message to history (now on Model, not Agent)
+		m.history = append(m.history, llm.Message{
+			Role:    "user",
+			Content: text,
+		})
+
+		m.textarea.Reset()
+		m.textarea.Blur()
+		m.waiting = true
+		m.toolRoundCount = 0
+		m.consecutiveErrors = 0
+		m.interruptCh = make(chan struct{})
+
+		m.refreshViewport()
+
+		return m, callLLMInterruptible(m.agent, m.history, m.interruptCh)
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
