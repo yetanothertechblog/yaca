@@ -11,6 +11,7 @@ import (
 	"go-tui/config"
 	"go-tui/conversation"
 	"go-tui/llm"
+	"go-tui/settings"
 	"go-tui/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,9 +26,17 @@ func main() {
 		resumeID = flag.Arg(0)
 	}
 
-	if err := llm.InitAPIKey(); err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
+	s, err := settings.Load()
+	if err != nil {
+		log.Printf("failed to load settings: %v", err)
+	}
+
+	if active := s.ActiveModel(); active != "" {
+		if md := config.ModelByName(active); md != nil {
+			if key := s.APIKey(active); key != "" {
+				llm.Configure(md.APIURL, key, active)
+			}
+		}
 	}
 
 	workingDir, err := os.Getwd()
@@ -84,7 +93,7 @@ func main() {
 		log.Printf("new conversation: %s", conv.ID)
 	}
 
-	m := tui.New(workingDir, conv)
+	m := tui.New(workingDir, conv, s)
 	p := tea.NewProgram(&m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)

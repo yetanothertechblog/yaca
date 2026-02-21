@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"go-tui/config"
+	"go-tui/permissions"
 )
 
 // Styles are defined in theme.go
@@ -34,9 +35,15 @@ func (p PermissionPrompt) View(width int) string {
 
 	title := permTitleStyle.Render("Tool Permission Required")
 
+	alwaysLabel := p.ToolName
+	if p.ToolName == "bash" {
+		if prefix := permissions.BashCommandPrefix(p.Args); prefix != "" {
+			alwaysLabel = fmt.Sprintf("bash: %s", prefix)
+		}
+	}
 	options := []string{
 		"Allow",
-		fmt.Sprintf("Always Allow %s", p.ToolName),
+		fmt.Sprintf("Always Allow %s", alwaysLabel),
 		"Deny",
 	}
 

@@ -89,17 +89,4 @@ var (
 	permSelectedStyle = lipgloss.NewStyle().
 				Foreground(colorAmber).
 				Bold(true)
-
 )
-
-// tokenBarColor returns the appropriate color for the token usage bar.
-func tokenBarColor(ratio float64) lipgloss.Color {
-	switch {
-	case ratio > 0.8:
-		return colorRust
-	case ratio > 0.5:
-		return colorBronze
-	default:
-		return colorPatina
-	}
-}

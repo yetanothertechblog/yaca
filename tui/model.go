@@ -14,6 +14,7 @@ import (
 	"go-tui/conversation"
 	"go-tui/llm"
 	"go-tui/permissions"
+	"go-tui/settings"
 	"go-tui/tui/slashcmd"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -80,13 +81,15 @@ type Model struct {
 	streamingThinking  bool
 	slashOverlay       *slashcmd.Overlay
 	rewindOverlay      *slashcmd.RewindOverlay
+	modelOverlay       *slashcmd.ModelOverlay
+	settings           *settings.Settings
 	interruptCh        chan struct{}
 	lastEscTime        time.Time
 }
 
 // separatorStyle and statusStyle are defined in theme.go
 
-func New(workingDir string, conv *conversation.Data) Model {
+func New(workingDir string, conv *conversation.Data, s *settings.Settings) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message..."
 	ta.Focus()
@@ -94,9 +97,9 @@ func New(workingDir string, conv *conversation.Data) Model {
 	ta.SetHeight(config.TextareaHeight)
 	ta.CharLimit = 0
 
-	s := spinner.New()
-	s.Spinner = spinner.Points
-	s.Style = spinnerStyle
+	sp := spinner.New()
+	sp.Spinner = spinner.Points
+	sp.Style = spinnerStyle
 
 	// Initialize markdown renderer before the TUI event loop starts,
 	// so the terminal color query (from "auto" style) completes before
@@ -129,7 +132,7 @@ func New(workingDir string, conv *conversation.Data) Model {
 
 	return Model{
 		textarea:         ta,
-		spinner:          s,
+		spinner:          sp,
 		messages:         messages,
 		agent:            a,
 		conv:             conv,
@@ -138,6 +141,7 @@ func New(workingDir string, conv *conversation.Data) Model {
 		history:          history,
 		workingDir:       workingDir,
 		permissions:      perms,
+		settings:         s,
 	}
 }
 
@@ -511,6 +515,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshViewport()
 		return m, nil
 
+	case ModelSwitchedMsg:
+		if msg.Err != nil {
+			m.appendError("Failed to switch model: " + msg.Err.Error())
+		} else {
+			m.messages = append(m.messages, ChatEntry{
+				Type:    EntryMessage,
+				Role:    "assistant",
+				Content: "Switched to model: " + msg.Name,
+			})
+		}
+		m.refreshViewport()
+		return m, nil
+
 	case RewindToMessageMsg:
 		// Truncate messages and history to before the selected message
 		m.messages = m.messages[:msg.MessageIndex]
@@ -624,7 +641,9 @@ func (m *Model) View() string {
 
 	vpView := m.viewport.View()
 
-	if m.rewindOverlay != nil {
+	if m.modelOverlay != nil {
+		vpView = m.modelOverlay.View(m.width, m.viewport.Height)
+	} else if m.rewindOverlay != nil {
 		vpView = m.rewindOverlay.View(m.width, m.viewport.Height)
 	} else if m.slashOverlay != nil {
 		overlay := m.slashOverlay.View(m.width)
@@ -664,18 +683,13 @@ func (m *Model) renderStatusLine() string {
 		}
 	}
 
-	// Right: <token label> <bar>
-	tokenLabel := statusStyle.Render(fmt.Sprintf("%d/%d ", m.totalTokens, config.MaxContextTokens))
-	barMaxWidth := m.width * 40 / 100
-	if barMaxWidth < 1 {
-		barMaxWidth = 1
+	// Right: <model name> · <token counter>
+	modelLabel := ""
+	if name := m.settings.ActiveModel(); name != "" {
+		modelLabel = statusStyle.Render(name + " · ")
 	}
-	displayTokens := m.totalTokens
-	if displayTokens < 1000 {
-		displayTokens = 1000
-	}
-	bar := renderBar(displayTokens, config.MaxContextTokens, barMaxWidth)
-	right := tokenLabel + bar + "  "
+	tokenLabel := statusStyle.Render(fmt.Sprintf("%d/%d Tokens", m.totalTokens, config.MaxContextTokens))
+	right := modelLabel + tokenLabel + "  "
 
 	// Layout: <left> <gap> <right>
 	leftWidth := lipgloss.Width(left)
@@ -685,15 +699,4 @@ func (m *Model) renderStatusLine() string {
 		gap = 1
 	}
 	return left + strings.Repeat(" ", gap) + right
-}
-
-func renderBar(value, max, width int) string {
-	ratio := float64(value) / float64(max)
-	if ratio > 1 {
-		ratio = 1
-	}
-	filled := int(ratio * float64(width))
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
-
-	return lipgloss.NewStyle().Foreground(tokenBarColor(ratio)).Render(bar)
 }

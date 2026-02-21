@@ -24,8 +24,6 @@ const (
 	SearchIcon = "🔍 "
 
 	// API Configuration
-	APIURL             = "https://api.z.ai/api/paas/v4/chat/completions"
-	ModelName          = "glm-4.5-air"
 	MaxContextTokens = 128000
 
 	// File Permissions

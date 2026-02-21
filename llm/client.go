@@ -6,34 +6,40 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
-
-	"github.com/joho/godotenv"
-	"go-tui/config"
+	"sync"
 )
 
-const (
-	apiURL    = config.APIURL
-	modelName = config.ModelName
+var (
+	mu        sync.RWMutex
+	activeURL string
+	activeKey string
+	activeModel string
 )
 
-var apiKey string
+// Configure sets the active model configuration used by CallLLM and CallLLMStream.
+func Configure(apiURL, apiKey, model string) {
+	mu.Lock()
+	defer mu.Unlock()
+	activeURL = apiURL
+	activeKey = apiKey
+	activeModel = model
+}
 
-func InitAPIKey() error {
-	if err := godotenv.Load(); err != nil {
-		return fmt.Errorf("error loading .env file: %w", err)
-	}
-	apiKey = os.Getenv("ZAI_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("ZAI_API_KEY not set in .env file")
-	}
-	return nil
+func getConfig() (string, string, string) {
+	mu.RLock()
+	defer mu.RUnlock()
+	return activeURL, activeKey, activeModel
 }
 
 func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
+	url, key, model := getConfig()
+	if url == "" || key == "" || model == "" {
+		return nil, fmt.Errorf("LLM not configured: call Configure() first")
+	}
+
 	req := ChatRequest{
-		Model:    modelName,
+		Model:    model,
 		Messages: messages,
 		Tools:    tools,
 		Stream:   false,
@@ -44,12 +50,12 @@ func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", apiURL, bytes.NewReader(body))
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+key)
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
@@ -79,8 +85,13 @@ func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 }
 
 func CallLLMStream(messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
+	url, key, model := getConfig()
+	if url == "" || key == "" || model == "" {
+		return nil, fmt.Errorf("LLM not configured: call Configure() first")
+	}
+
 	req := ChatRequest{
-		Model:    modelName,
+		Model:    model,
 		Messages: messages,
 		Tools:    tools,
 		Stream:   true,
@@ -91,12 +102,12 @@ func CallLLMStream(messages []Message, tools []Tool, onContent func(string, bool
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", apiURL, bytes.NewReader(body))
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+key)
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {

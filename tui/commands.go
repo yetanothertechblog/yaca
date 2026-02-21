@@ -65,6 +65,11 @@ type UserInputMsg struct {
 	Text string
 }
 
+type ModelSwitchedMsg struct {
+	Name string
+	Err  error
+}
+
 const (
 	PermissionAllow PermissionDecision = iota
 	PermissionAlwaysAllow

@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 
+	"go-tui/config"
 	"go-tui/tui/slashcmd"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -30,6 +31,8 @@ func (m *Model) executeSlashCommand(text string) (bool, tea.Cmd) {
 		return true, compactHistory(m.history)
 	case "/rewind":
 		return m.executeRewind()
+	case "/model":
+		return m.executeModel()
 	case "/help", "/status":
 		m.appendError("Command not yet implemented")
 		m.refreshViewport()
@@ -83,6 +86,25 @@ func (m *Model) executeRewind() (bool, tea.Cmd) {
 	m.rewindOverlay = &slashcmd.RewindOverlay{
 		Items:  items,
 		Cursor: len(items) - 1,
+	}
+	return true, nil
+}
+
+func (m *Model) executeModel() (bool, tea.Cmd) {
+	names := config.ModelNames()
+	active := m.settings.ActiveModel()
+	cursor := 0
+	for i, n := range names {
+		if n == active {
+			cursor = i
+			break
+		}
+	}
+
+	m.modelOverlay = &slashcmd.ModelOverlay{
+		Items:  names,
+		Cursor: cursor,
+		Active: active,
 	}
 	return true, nil
 }
