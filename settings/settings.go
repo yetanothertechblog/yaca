@@ -6,7 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
+"sync"
 )
 
 const settingsFile = ".yaca/settings.json"

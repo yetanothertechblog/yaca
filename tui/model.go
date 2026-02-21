@@ -55,40 +55,40 @@ const maxToolRounds = config.MaxToolRounds
 const maxConsecutiveErrors = 3
 
 type Model struct {
-	viewport           viewport.Model
-	textarea           textarea.Model
-	spinner            spinner.Model
-	messages           []ChatEntry
-	agent              *agent.Agent
-	waiting            bool
-	width              int
-	height             int
-	ready              bool
-	permission         *PermissionPrompt
-	conv               *conversation.Data
-	convDir            string
-	markdownRenderer   *MarkdownRenderer
-	history            []llm.Message
-	workingDir         string
-	permissions        *permissions.Permissions
-	toolRoundCount     int
-	consecutiveErrors  int
-	pendingToolCalls   []llm.ToolCall
-	pendingToolIndex   int
-	awaitingPermission *llm.ToolCall
-	totalTokens             int
-	streamingTokens         int
-	streamingThinking       bool
-	streamingContent        string
+	viewport                 viewport.Model
+	textarea                 textarea.Model
+	spinner                  spinner.Model
+	messages                 []ChatEntry
+	agent                    *agent.Agent
+	waiting                  bool
+	width                    int
+	height                   int
+	ready                    bool
+	permission               *PermissionPrompt
+	conv                     *conversation.Data
+	convDir                  string
+	markdownRenderer         *MarkdownRenderer
+	history                  []llm.Message
+	workingDir               string
+	permissions              *permissions.Permissions
+	toolRoundCount           int
+	consecutiveErrors        int
+	pendingToolCalls         []llm.ToolCall
+	pendingToolIndex         int
+	awaitingPermission       *llm.ToolCall
+	totalTokens              int
+	streamingTokens          int
+	streamingThinking        bool
+	streamingContent         string
 	streamingThinkingContent string
-	slashOverlay         *slashcmd.Overlay
-	rewindOverlay        *slashcmd.RewindOverlay
-	conversationOverlay  *slashcmd.RewindOverlay
-	modelOverlay         *slashcmd.ModelOverlay
-	settings           *settings.Settings
-	interruptCh        chan struct{}
-	lastEscTime        time.Time
-	bypassPermissions  bool
+	slashOverlay             *slashcmd.Overlay
+	rewindOverlay            *slashcmd.RewindOverlay
+	conversationOverlay      *slashcmd.RewindOverlay
+	modelOverlay             *slashcmd.ModelOverlay
+	settings                 *settings.Settings
+	interruptCh              chan struct{}
+	lastEscTime              time.Time
+	bypassPermissions        bool
 }
 
 // separatorStyle and statusStyle are defined in theme.go
@@ -697,7 +697,7 @@ func (m *Model) View() string {
 	if m.bypassPermissions {
 		bypassLine = bypassStyle.Render(">> Bypass Permissions (Shift+Tab to toggle mode)")
 	} else {
-		bypassLine = requirePermissionsStyle.Render(">> Ask For Permissions (Shift+Tab to toggle mode)")
+		bypassLine = requirePermissionsStyle.Render("⏸ Ask For Permissions (Shift+Tab to toggle mode)")
 	}
 
 	return lipgloss.JoinVertical(
