@@ -33,7 +33,7 @@ func main() {
 
 	if active := s.ActiveModel(); active != "" {
 		if md := config.ModelByName(active); md != nil {
-			if key := s.APIKey(active); key != "" {
+			if key := s.APIKey(md.APIKeyName); key != "" {
 				llm.Configure(md.APIURL, key, active)
 			}
 		}
@@ -94,7 +94,7 @@ func main() {
 	}
 
 	m := tui.New(workingDir, conv, s)
-	p := tea.NewProgram(&m, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(&m, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)

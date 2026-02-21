@@ -254,10 +254,13 @@ func handleModelOverlayKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 		}
 		selected := m.modelOverlay.Items[m.modelOverlay.Cursor]
 
-		// Check if we already have an API key for this model
-		if key := m.settings.APIKey(selected); key != "" {
-			m.modelOverlay = nil
-			return m, activateModel(m, selected, key)
+		// Check if we already have an API key for this model's provider
+		md := config.ModelByName(selected)
+		if md != nil {
+			if key := m.settings.APIKey(md.APIKeyName); key != "" {
+				m.modelOverlay = nil
+				return m, activateModel(m, selected, key)
+			}
 		}
 
 		// No key stored — prompt for it
@@ -304,18 +307,17 @@ func handleModelKeyInput(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 
 func activateModel(m *Model, name, apiKey string) tea.Cmd {
 	return func() tea.Msg {
-		// Save API key
-		if err := m.settings.SetAPIKey(name, apiKey); err != nil {
+		md := config.ModelByName(name)
+		if md == nil {
+			return ModelSwitchedMsg{Err: fmt.Errorf("unknown model: %s", name)}
+		}
+		// Save API key under the provider key name (e.g. "Z_API")
+		if err := m.settings.SetAPIKey(md.APIKeyName, apiKey); err != nil {
 			return ModelSwitchedMsg{Err: fmt.Errorf("failed to save API key: %w", err)}
 		}
 		// Set active model
 		if err := m.settings.SetActiveModel(name); err != nil {
 			return ModelSwitchedMsg{Err: err}
-		}
-		// Look up model config from binary
-		md := config.ModelByName(name)
-		if md == nil {
-			return ModelSwitchedMsg{Err: fmt.Errorf("unknown model: %s", name)}
 		}
 		llm.Configure(md.APIURL, apiKey, name)
 		return ModelSwitchedMsg{Name: name}
