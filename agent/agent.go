@@ -14,8 +14,6 @@ const systemPromptTemplate = `You are an expert coding assistant with integrated
 
 Working directory: %s
 
-%s
-
 Rules:
 - ALWAYS explain code changes before making them. DO NOT JUST EDIT CODE
 - Always break down tasks into smaller, manageable subtasks
@@ -28,7 +26,9 @@ Rules:
 - Use the tools available to you when needed.
 - When reading files, use paths relative to the working directory unless an absolute path is given.
 - The system automatically runs LSP diagnostics after editing files to catch errors.
-- Consider LSP feedback when making code changes and fix any reported issues.`
+- Consider LSP feedback when making code changes and fix any reported issues.
+
+%s`
 
 type Agent struct {
 	workingDir string
@@ -57,7 +57,7 @@ func (a *Agent) SystemPrompt() string {
 func (a *Agent) readYacaMarkdown() string {
 	yacaPath := filepath.Join(a.workingDir, "YACA.md")
 	if data, err := os.ReadFile(yacaPath); err == nil {
-		return string(data)
+		return "\n<project_info>\n" + string(data) + "\n</project_info>"
 	}
 	return ""
 }
