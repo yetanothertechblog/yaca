@@ -53,6 +53,10 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md 
 		}
 
 		rendered = strings.Trim(rendered, "\n")
+		if rendered == "" {
+			i++
+			continue
+		}
 		sb.WriteString(rendered + "\n\n")
 
 		i++
@@ -63,10 +67,9 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md 
 		sb.WriteString(renderThinkingBlock(streamingThinkingContent) + "\n\n")
 	}
 
-	// In-progress streaming response (plain text, no markdown on partial content)
+	// In-progress streaming response — rendered through glamour where possible.
 	if streamingContent != "" {
-		rendered := strings.Trim(streamingContent, "\n")
-		sb.WriteString(rendered + "\n\n")
+		sb.WriteString(renderStreamingMarkdown(streamingContent, md) + "\n\n")
 	}
 
 	// Show permission prompt inline
@@ -145,7 +148,7 @@ func renderMessageEntry(entry ChatEntry, md *MarkdownRenderer) string {
 }
 
 func renderAssistantMessage(content string, md *MarkdownRenderer) string {
-	if md != nil && isMarkdown(content) {
+	if md != nil {
 		if r, err := md.Render(content); err == nil {
 			return r
 		}
