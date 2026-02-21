@@ -94,7 +94,7 @@ func main() {
 	}
 
 	m := tui.New(workingDir, conv, s)
-	p := tea.NewProgram(&m, tea.WithAltScreen())
+	p := tea.NewProgram(&m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
