@@ -49,6 +49,22 @@ type InterruptMsg struct {
 
 type PermissionDecision int
 
+type RewindToMessageMsg struct {
+	MessageIndex int
+	HistoryIndex int
+	FullText     string
+}
+
+type PermissionDecisionMsg struct {
+	Decision    PermissionDecision
+	ToolCall    llm.ToolCall
+	AlwaysAllow bool
+}
+
+type UserInputMsg struct {
+	Text string
+}
+
 const (
 	PermissionAllow PermissionDecision = iota
 	PermissionAlwaysAllow

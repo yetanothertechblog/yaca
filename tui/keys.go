@@ -4,7 +4,6 @@ import (
 	"strings"
 	"time"
 
-	"go-tui/llm"
 	"go-tui/tui/slashcmd"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -72,28 +71,10 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 			return m, cmd
 		}
 
-		m.messages = append(m.messages, ChatEntry{
-			Type:    EntryMessage,
-			Role:    "user",
-			Content: text,
-		})
-
-		// Append user message to history (now on Model, not Agent)
-		m.history = append(m.history, llm.Message{
-			Role:    "user",
-			Content: text,
-		})
-
-		m.textarea.Reset()
-		m.textarea.Blur()
-		m.waiting = true
-		m.toolRoundCount = 0
-		m.consecutiveErrors = 0
-		m.interruptCh = make(chan struct{})
-
-		m.refreshViewport()
-
-		return m, callLLMInterruptible(m.agent, m.history, m.interruptCh)
+		// Send user input message to the model for processing
+		return m, func() tea.Msg {
+			return UserInputMsg{Text: text}
+		}
 	}
 
 	if m.waiting {
@@ -213,16 +194,14 @@ func handleRewindOverlayKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 		item := m.rewindOverlay.Items[m.rewindOverlay.Cursor]
 		m.rewindOverlay = nil
 
-		// Truncate messages and history to before the selected message
-		m.messages = m.messages[:item.MessageIndex]
-		m.history = m.history[:item.HistoryIndex]
-
-		// Populate textarea with the selected message text
-		m.textarea.SetValue(item.FullText)
-
-		m.saveConversation()
-		m.refreshViewport()
-		return m, nil
+		// Send rewind message to the model for processing
+		return m, func() tea.Msg {
+			return RewindToMessageMsg{
+				MessageIndex: item.MessageIndex,
+				HistoryIndex: item.HistoryIndex,
+				FullText:     item.FullText,
+			}
+		}
 	}
 
 	return m, nil
@@ -254,41 +233,14 @@ func handlePermissionKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 		m.awaitingPermission = nil
 		m.refreshViewport()
 
-		switch cursor {
-		case 0: // Allow
-			return m, executeToolInterruptible(m.agent, *tc, m.interruptCh)
-
-		case 1: // Always Allow
-			m.alwaysAllow[tc.Function.Name] = true
-			return m, executeToolInterruptible(m.agent, *tc, m.interruptCh)
-
-		case 2: // Deny
-			command := tc.Function.Name + ": " + tc.Function.Arguments
-			result := "Tool call denied by user."
-
-			// Append denial to history
-			m.history = append(m.history, llm.Message{
-				Role:       "tool",
-				Content:    result,
-				ToolCallID: tc.ID,
-			})
-
-			// Append denied tool call to UI messages
-			m.messages = append(m.messages, ChatEntry{
-				Type:    EntryToolCall,
-				Command: command,
-				Denied:  true,
-				Diff:    parseDiffFromToolCall(tc.Function.Name, tc.Function.Arguments, "", m.workingDir, true),
-			})
-
-			// Stop the loop — return to user input
-			m.pendingToolCalls = nil
-			m.pendingToolIndex = 0
-			m.waiting = false
-			m.textarea.Focus()
-			m.saveConversation()
-			m.refreshViewport()
-			return m, nil
+		// Send permission decision message to the model for processing
+		decision := PermissionDecision(cursor)
+		return m, func() tea.Msg {
+			return PermissionDecisionMsg{
+				Decision:    decision,
+				ToolCall:    *tc,
+				AlwaysAllow: decision == PermissionAlwaysAllow,
+			}
 		}
 	}
 
