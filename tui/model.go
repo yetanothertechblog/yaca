@@ -40,14 +40,15 @@ type DiffData struct {
 }
 
 type ChatEntry struct {
-	Type    EntryType `json:"type"`
-	Role    string    `json:"role,omitempty"`
-	Content string    `json:"content,omitempty"`
-	Command string    `json:"command,omitempty"`
-	Result  string    `json:"result,omitempty"`
-	Denied  bool      `json:"denied,omitempty"`
-	Diff    *DiffData `json:"diff,omitempty"`
-	Error   string    `json:"error,omitempty"`
+	Type             EntryType `json:"type"`
+	Role             string    `json:"role,omitempty"`
+	Content          string    `json:"content,omitempty"`
+	ReasoningContent string    `json:"reasoning_content,omitempty"`
+	Command          string    `json:"command,omitempty"`
+	Result           string    `json:"result,omitempty"`
+	Denied           bool      `json:"denied,omitempty"`
+	Diff             *DiffData `json:"diff,omitempty"`
+	Error            string    `json:"error,omitempty"`
 }
 
 const maxToolRounds = config.MaxToolRounds
@@ -75,9 +76,11 @@ type Model struct {
 	pendingToolCalls   []llm.ToolCall
 	pendingToolIndex   int
 	awaitingPermission *llm.ToolCall
-	totalTokens        int
-	streamingTokens    int
-	streamingThinking  bool
+	totalTokens             int
+	streamingTokens         int
+	streamingThinking       bool
+	streamingContent        string
+	streamingThinkingContent string
 	slashOverlay         *slashcmd.Overlay
 	rewindOverlay        *slashcmd.RewindOverlay
 	conversationOverlay  *slashcmd.RewindOverlay
@@ -285,7 +288,7 @@ func (m *Model) updateMarkdownRenderer() {
 }
 
 func (m *Model) refreshViewport() {
-	m.viewport.SetContent(renderMessages(m.messages, m.permission, m.width, m.markdownRenderer))
+	m.viewport.SetContent(renderMessages(m.messages, m.permission, m.width, m.markdownRenderer, m.streamingContent, m.streamingThinkingContent))
 	m.viewport.GotoBottom()
 }
 
@@ -365,12 +368,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m, cmd = handleKeyMsg(m, msg)
 		return m, cmd
 
-	case StreamTokenCountMsg:
-		m.streamingTokens = msg.Count
+	case StreamChunkMsg:
 		m.streamingThinking = msg.Thinking
+		m.streamingTokens += int(float64(len(strings.Fields(msg.Content))) * 0.75)
+		m.streamingContent += msg.Content
+		m.streamingThinkingContent += msg.ThinkingContent
+		m.refreshViewport()
 		return m, waitForStreamInterruptible(msg.ch, m.interruptCh)
 
 	case LLMResponseMsg:
+		m.streamingContent = ""
+		m.streamingThinkingContent = ""
 		m.streamingTokens = 0
 		m.streamingThinking = false
 		if msg.Usage != nil {
@@ -393,11 +401,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Role:    "assistant",
 				Content: msg.Content,
 			})
-			if strings.TrimSpace(msg.Content) != "" {
+			if strings.TrimSpace(msg.Content) != "" || msg.ReasoningContent != "" {
 				m.messages = append(m.messages, ChatEntry{
-					Type:    EntryMessage,
-					Role:    "assistant",
-					Content: msg.Content,
+					Type:             EntryMessage,
+					Role:             "assistant",
+					Content:          msg.Content,
+					ReasoningContent: msg.ReasoningContent,
 				})
 			}
 			m.saveConversation()
@@ -413,11 +422,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 
 		// If there's meaningful content alongside tool calls, show it
-		if strings.TrimSpace(msg.Content) != "" {
+		if strings.TrimSpace(msg.Content) != "" || msg.ReasoningContent != "" {
 			m.messages = append(m.messages, ChatEntry{
-				Type:    EntryMessage,
-				Role:    "assistant",
-				Content: msg.Content,
+				Type:             EntryMessage,
+				Role:             "assistant",
+				Content:          msg.Content,
+				ReasoningContent: msg.ReasoningContent,
 			})
 		}
 
@@ -503,6 +513,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case InterruptMsg:
+		m.streamingContent = ""
+		m.streamingThinkingContent = ""
 		m.waiting = false
 		m.textarea.Focus()
 		m.appendError(msg.Reason)
@@ -683,7 +695,9 @@ func (m *Model) View() string {
 
 	bypassLine := " "
 	if m.bypassPermissions {
-		bypassLine = bypassStyle.Render("⚡ BYPASS MODE (Shift+Tab to disable)")
+		bypassLine = bypassStyle.Render(">> Bypass Permissions (Shift+Tab to toggle mode)")
+	} else {
+		bypassLine = requirePermissionsStyle.Render(">> Ask For Permissions (Shift+Tab to toggle mode)")
 	}
 
 	return lipgloss.JoinVertical(

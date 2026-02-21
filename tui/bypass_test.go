@@ -109,13 +109,13 @@ func TestBypassViewIndicator(t *testing.T) {
 	m := newBypassTestModel(t)
 
 	view := stripANSI(m.View())
-	if strings.Contains(view, "BYPASS") {
+	if strings.Contains(view, "Bypass Permissions") {
 		t.Error("bypass indicator should not appear when bypass is off")
 	}
 
 	m.bypassPermissions = true
 	view = stripANSI(m.View())
-	if !strings.Contains(view, "BYPASS") {
+	if !strings.Contains(view, "Bypass Permissions") {
 		t.Error("bypass indicator should appear when bypass is on")
 	}
 }
