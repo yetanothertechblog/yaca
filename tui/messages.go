@@ -11,8 +11,8 @@ import (
 
 // Styles are defined in theme.go
 
-func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md *MarkdownRenderer) string {
-	if len(messages) == 0 && perm == nil {
+func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md *MarkdownRenderer, streamingContent, streamingThinkingContent string) string {
+	if len(messages) == 0 && perm == nil && streamingContent == "" && streamingThinkingContent == "" {
 		return "Welcome! Type a message and press Enter to send."
 	}
 
@@ -56,6 +56,17 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md 
 		sb.WriteString(rendered + "\n\n")
 
 		i++
+	}
+
+	// Thinking block: last 3 lines of accumulated thinking content
+	if strings.TrimSpace(streamingThinkingContent) != "" {
+		sb.WriteString(renderThinkingBlock(streamingThinkingContent) + "\n\n")
+	}
+
+	// In-progress streaming response (plain text, no markdown on partial content)
+	if streamingContent != "" {
+		rendered := strings.Trim(streamingContent, "\n")
+		sb.WriteString(rendered + "\n\n")
 	}
 
 	// Show permission prompt inline
@@ -107,12 +118,27 @@ func renderToolCallEntry(entry ChatEntry) string {
 	}
 }
 
+func renderThinkingBlock(content string) string {
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	start := len(lines) - 3
+	if start < 0 {
+		start = 0
+	}
+	excerpt := thinkingContentStyle.Render(strings.Join(lines[start:], "\n"))
+	return thinkingLabelStyle.Render("Thinking…") + "\n" + excerpt
+}
+
 func renderMessageEntry(entry ChatEntry, md *MarkdownRenderer) string {
 	switch entry.Role {
 	case "user":
 		return userMessageStyle.Render("❯ " + entry.Content)
 	case "assistant":
-		return renderAssistantMessage(entry.Content, md)
+		var parts []string
+		if strings.TrimSpace(entry.ReasoningContent) != "" {
+			parts = append(parts, renderThinkingBlock(entry.ReasoningContent))
+		}
+		parts = append(parts, renderAssistantMessage(entry.Content, md))
+		return strings.Join(parts, "\n\n")
 	default:
 		return fmt.Sprintf("%s: %s", entry.Role, entry.Content)
 	}
