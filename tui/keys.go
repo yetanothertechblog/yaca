@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
+	"go-tui/config"
+	"go-tui/llm"
 	"go-tui/tui/slashcmd"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -33,6 +36,11 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 	// Permission prompt mode
 	if m.permission != nil {
 		return handlePermissionKey(m, msg)
+	}
+
+	// Model overlay mode
+	if m.modelOverlay != nil {
+		return handleModelOverlayKey(m, msg)
 	}
 
 	// Rewind overlay mode
@@ -205,6 +213,103 @@ func handleRewindOverlayKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func handleModelOverlayKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
+	if m.modelOverlay.AwaitingKey {
+		return handleModelKeyInput(m, msg)
+	}
+
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.modelOverlay.Cursor > 0 {
+			m.modelOverlay.Cursor--
+		}
+		return m, nil
+
+	case tea.KeyDown:
+		if m.modelOverlay.Cursor < len(m.modelOverlay.Items)-1 {
+			m.modelOverlay.Cursor++
+		}
+		return m, nil
+
+	case tea.KeyEsc:
+		m.modelOverlay = nil
+		return m, nil
+
+	case tea.KeyEnter:
+		if len(m.modelOverlay.Items) == 0 {
+			m.modelOverlay = nil
+			return m, nil
+		}
+		selected := m.modelOverlay.Items[m.modelOverlay.Cursor]
+
+		// Check if we already have an API key for this model
+		if key := m.settings.APIKey(selected); key != "" {
+			m.modelOverlay = nil
+			return m, activateModel(m, selected, key)
+		}
+
+		// No key stored — prompt for it
+		m.modelOverlay.AwaitingKey = true
+		m.modelOverlay.SelectedModel = selected
+		m.modelOverlay.KeyInput = ""
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func handleModelKeyInput(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		// Go back to model list
+		m.modelOverlay.AwaitingKey = false
+		m.modelOverlay.SelectedModel = ""
+		m.modelOverlay.KeyInput = ""
+		return m, nil
+
+	case tea.KeyEnter:
+		key := strings.TrimSpace(m.modelOverlay.KeyInput)
+		if key == "" {
+			return m, nil
+		}
+		selected := m.modelOverlay.SelectedModel
+		m.modelOverlay = nil
+		return m, activateModel(m, selected, key)
+
+	case tea.KeyBackspace:
+		if len(m.modelOverlay.KeyInput) > 0 {
+			m.modelOverlay.KeyInput = m.modelOverlay.KeyInput[:len(m.modelOverlay.KeyInput)-1]
+		}
+		return m, nil
+
+	case tea.KeyRunes:
+		m.modelOverlay.KeyInput += string(msg.Runes)
+		return m, nil
+	}
+
+	return m, nil
+}
+
+func activateModel(m *Model, name, apiKey string) tea.Cmd {
+	return func() tea.Msg {
+		// Save API key
+		if err := m.settings.SetAPIKey(name, apiKey); err != nil {
+			return ModelSwitchedMsg{Err: fmt.Errorf("failed to save API key: %w", err)}
+		}
+		// Set active model
+		if err := m.settings.SetActiveModel(name); err != nil {
+			return ModelSwitchedMsg{Err: err}
+		}
+		// Look up model config from binary
+		md := config.ModelByName(name)
+		if md == nil {
+			return ModelSwitchedMsg{Err: fmt.Errorf("unknown model: %s", name)}
+		}
+		llm.Configure(md.APIURL, apiKey, name)
+		return ModelSwitchedMsg{Name: name}
+	}
 }
 
 func handlePermissionKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
