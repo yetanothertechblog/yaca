@@ -74,6 +74,9 @@ func renderToolCallEntry(entry ChatEntry) string {
 	bullet := toolBulletStyle.Render("⏺ ") + toolCmdStyle.Render(header)
 
 	if entry.Denied {
+		if entry.Diff != nil {
+			return bullet + "\n" + indentBlock(renderDiff(*entry.Diff)) + "\n" + indentBlock(deniedStyle.Render("User declined"))
+		}
 		return bullet + " " + deniedStyle.Render("User declined")
 	}
 

@@ -66,6 +66,22 @@ var (
 	diffLineNumStyle = lipgloss.NewStyle().
 				Foreground(colorForgedIron)
 
+	diffAddedLineNumStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#4A8C45")).
+				Background(lipgloss.Color("#2D5A27"))
+
+	diffRemovedLineNumStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#8C3A3A")).
+				Background(lipgloss.Color("#6B1A1A"))
+
+	diffAddedMarkerStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#4A8C45")).
+				Background(lipgloss.Color("#2D5A27"))
+
+	diffRemovedMarkerStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#8C3A3A")).
+				Background(lipgloss.Color("#6B1A1A"))
+
 	toolBulletStyle = lipgloss.NewStyle().
 			Foreground(colorCopper).
 			Bold(true)

@@ -33,11 +33,10 @@ const (
 )
 
 type DiffData struct {
-	FilePath     string `json:"file_path"`
-	OldText      string `json:"old_text"`
-	NewText      string `json:"new_text"`
-	StartLine    int    `json:"start_line,omitempty"`
-	BlockReplace bool   `json:"block_replace,omitempty"` // true for edit_file: show as block replacement
+	FilePath  string `json:"file_path"`
+	OldText   string `json:"old_text"`
+	NewText   string `json:"new_text"`
+	StartLine int    `json:"start_line,omitempty"`
 }
 
 type ChatEntry struct {
@@ -192,36 +191,40 @@ func parseDiffFromToolCall(toolName, args, result, workingDir string, denied boo
 	}
 
 	switch toolName {
-	case "edit_file", "write_file":
+	case "write_file":
 		var r struct {
 			FilePath   string `json:"file_path"`
-			OldString  string `json:"old_string"`
-			NewString  string `json:"new_string"`
-			OldContent string `json:"old_content"`
 			NewContent string `json:"new_content"`
-			IsNewFile  bool   `json:"is_new_file"`
 		}
 		if json.Unmarshal([]byte(result), &r) != nil || r.FilePath == "" {
 			return parseDiffFromArgs(toolName, args, workingDir)
 		}
-		old := r.OldString + r.OldContent
-		new_ := r.NewString + r.NewContent
+		return &DiffData{
+			FilePath: r.FilePath,
+			NewText:  r.NewContent,
+		}
+	case "edit_file":
+		var r struct {
+			FilePath  string `json:"file_path"`
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		}
+		if json.Unmarshal([]byte(result), &r) != nil || r.FilePath == "" {
+			return parseDiffFromArgs(toolName, args, workingDir)
+		}
 		startLine := 1
-		if toolName == "edit_file" {
-			path := r.FilePath
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(workingDir, path)
-			}
-			if data, err := os.ReadFile(path); err == nil {
-				startLine = findStartLine(string(data), r.OldString)
-			}
+		path := r.FilePath
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		if data, err := os.ReadFile(path); err == nil {
+			startLine = findStartLine(string(data), r.OldString)
 		}
 		return &DiffData{
-			FilePath:     r.FilePath,
-			OldText:      old,
-			NewText:      new_,
-			StartLine:    startLine,
-			BlockReplace: toolName == "edit_file",
+			FilePath:  r.FilePath,
+			OldText:   r.OldString,
+			NewText:   r.NewString,
+			StartLine: startLine,
 		}
 	}
 	return nil
@@ -247,11 +250,10 @@ func parseDiffFromArgs(name, argsJSON, workingDir string) *DiffData {
 			startLine = findStartLine(string(data), args.OldString)
 		}
 		return &DiffData{
-			FilePath:     args.FilePath,
-			OldText:      args.OldString,
-			NewText:      args.NewString,
-			StartLine:    startLine,
-			BlockReplace: true,
+			FilePath:  args.FilePath,
+			OldText:   args.OldString,
+			NewText:   args.NewString,
+			StartLine: startLine,
 		}
 
 	case "write_file":
@@ -262,19 +264,10 @@ func parseDiffFromArgs(name, argsJSON, workingDir string) *DiffData {
 		if json.Unmarshal([]byte(argsJSON), &args) != nil || args.FilePath == "" {
 			return nil
 		}
-		path := args.FilePath
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(workingDir, path)
+		return &DiffData{
+			FilePath: args.FilePath,
+			NewText:  args.Content,
 		}
-		d := &DiffData{
-			FilePath:  args.FilePath,
-			NewText:   args.Content,
-			StartLine: 1,
-		}
-		if data, err := os.ReadFile(path); err == nil {
-			d.OldText = string(data)
-		}
-		return d
 	}
 	return nil
 }
