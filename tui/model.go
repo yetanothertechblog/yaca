@@ -13,6 +13,7 @@ import (
 	"go-tui/config"
 	"go-tui/conversation"
 	"go-tui/llm"
+	"go-tui/permissions"
 	"go-tui/tui/slashcmd"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -68,7 +69,7 @@ type Model struct {
 	markdownRenderer   *MarkdownRenderer
 	history            []llm.Message
 	workingDir         string
-	alwaysAllow        map[string]bool
+	permissions        *permissions.Permissions
 	toolRoundCount     int
 	consecutiveErrors  int
 	pendingToolCalls   []llm.ToolCall
@@ -121,6 +122,11 @@ func New(workingDir string, conv *conversation.Data) Model {
 		log.Printf("failed to unmarshal agent history: %v", err)
 	}
 
+	perms, err := permissions.Load(workingDir)
+	if err != nil {
+		log.Printf("failed to load permissions: %v", err)
+	}
+
 	return Model{
 		textarea:         ta,
 		spinner:          s,
@@ -131,7 +137,7 @@ func New(workingDir string, conv *conversation.Data) Model {
 		markdownRenderer: markdownRenderer,
 		history:          history,
 		workingDir:       workingDir,
-		alwaysAllow:      make(map[string]bool),
+		permissions:      perms,
 	}
 }
 
@@ -305,7 +311,7 @@ func (m *Model) dispatchNextTool() tea.Cmd {
 
 	tc := m.pendingToolCalls[m.pendingToolIndex]
 
-	if m.alwaysAllow[tc.Function.Name] {
+	if m.permissions.IsAllowed(tc.Function.Name, tc.Function.Arguments) {
 		return executeToolInterruptible(m.agent, tc, m.interruptCh)
 	}
 
@@ -523,7 +529,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, executeToolInterruptible(m.agent, msg.ToolCall, m.interruptCh)
 
 		case PermissionAlwaysAllow:
-			m.alwaysAllow[msg.ToolCall.Function.Name] = true
+			entry := msg.ToolCall.Function.Name
+			if entry == "bash" {
+				if prefix := permissions.BashCommandPrefix(msg.ToolCall.Function.Arguments); prefix != "" {
+					entry = permissions.BashEntry(prefix)
+				}
+			}
+			if err := m.permissions.Add(entry); err != nil {
+				log.Printf("failed to save permission: %v", err)
+			}
 			return m, executeToolInterruptible(m.agent, msg.ToolCall, m.interruptCh)
 
 		case PermissionDeny:
