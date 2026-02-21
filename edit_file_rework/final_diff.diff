@@ -1,0 +1,16 @@
+diff --git a/conversation/conversation.go b/conversation/conversation.go
+index 0000000..0000000
+--- a/conversation/conversation.go
++++ b/conversation/conversation.go
+@@ -0,0 +1,10 @@
+
++package conversationimport (\t"bufio"
++	\t"bytes"
++	\t"encoding/json"
++	\t"fmt"
++	\t"os"
++	\t"path/filepath"
++	\t"sort"
++	\t"github.com/gofrs/uuid/v5"
++	\t"go-tui/config"
++	)

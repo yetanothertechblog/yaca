@@ -7,13 +7,20 @@ type ModelDef struct {
 	MaxContextTokens int
 }
 
+const zaiEndpoint = "https://api.z.ai/api/paas/v4/chat/completions"
+
 // SupportedModels is the hardcoded list of models the binary supports.
 var SupportedModels = []ModelDef{
-	{
-		Name:             "glm-4.5-air",
-		APIURL:           "https://api.z.ai/api/paas/v4/chat/completions",
-		MaxContextTokens: 128000,
-	},
+	// GLM-4.7 series — 200K context
+	{Name: "glm-4.7", APIURL: zaiEndpoint, MaxContextTokens: 200000},
+	{Name: "glm-4.7-flashx", APIURL: zaiEndpoint, MaxContextTokens: 200000},
+	{Name: "glm-4.7-flash", APIURL: zaiEndpoint, MaxContextTokens: 200000},
+	// GLM-4.5 series — 128K context
+	{Name: "glm-4.5", APIURL: zaiEndpoint, MaxContextTokens: 128000},
+	{Name: "glm-4.5-air", APIURL: zaiEndpoint, MaxContextTokens: 128000},
+	{Name: "glm-4.5-x", APIURL: zaiEndpoint, MaxContextTokens: 128000},
+	{Name: "glm-4.5-airx", APIURL: zaiEndpoint, MaxContextTokens: 128000},
+	{Name: "glm-4.5-flash", APIURL: zaiEndpoint, MaxContextTokens: 128000},
 }
 
 // ModelByName returns the model definition for the given name, or nil if not found.

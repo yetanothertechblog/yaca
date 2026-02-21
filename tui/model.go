@@ -78,12 +78,14 @@ type Model struct {
 	totalTokens        int
 	streamingTokens    int
 	streamingThinking  bool
-	slashOverlay       *slashcmd.Overlay
-	rewindOverlay      *slashcmd.RewindOverlay
-	modelOverlay       *slashcmd.ModelOverlay
+	slashOverlay         *slashcmd.Overlay
+	rewindOverlay        *slashcmd.RewindOverlay
+	conversationOverlay  *slashcmd.RewindOverlay
+	modelOverlay         *slashcmd.ModelOverlay
 	settings           *settings.Settings
 	interruptCh        chan struct{}
 	lastEscTime        time.Time
+	bypassPermissions  bool
 }
 
 // separatorStyle and statusStyle are defined in theme.go
@@ -308,7 +310,7 @@ func (m *Model) dispatchNextTool() tea.Cmd {
 
 	tc := m.pendingToolCalls[m.pendingToolIndex]
 
-	if m.permissions.IsAllowed(tc.Function.Name, tc.Function.Arguments) {
+	if m.bypassPermissions || m.permissions.IsAllowed(tc.Function.Name, tc.Function.Arguments) {
 		return executeToolInterruptible(m.agent, tc, m.interruptCh)
 	}
 
@@ -333,8 +335,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		// statusLine(1) + separator(1) + textarea(3) + separator(1) = 6
-		vpHeight := m.height - 6
+		// statusLine(1) + separator(1) + textarea(3) + separator(1) + bypassLine(1) = 7
+		vpHeight := m.height - 7
 		taWidth := m.width
 
 		if !m.ready {
@@ -579,6 +581,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+	case ResumeConversationMsg:
+		var messages []ChatEntry
+		if err := json.Unmarshal(msg.Conv.UIMessages, &messages); err != nil {
+			m.appendError("Failed to restore conversation: " + err.Error())
+			m.refreshViewport()
+			return m, nil
+		}
+		var history []llm.Message
+		if err := json.Unmarshal(msg.Conv.AgentHistory, &history); err != nil {
+			m.appendError("Failed to restore conversation history: " + err.Error())
+			m.refreshViewport()
+			return m, nil
+		}
+		m.messages = messages
+		m.history = history
+		m.conv = msg.Conv
+		m.totalTokens = 0
+		m.toolRoundCount = 0
+		m.consecutiveErrors = 0
+		m.pendingToolCalls = nil
+		m.pendingToolIndex = 0
+		m.waiting = false
+		m.textarea.Focus()
+		m.refreshViewport()
+		return m, nil
+
 	case UserInputMsg:
 		text := msg.Text
 
@@ -638,6 +666,8 @@ func (m *Model) View() string {
 		vpView = m.modelOverlay.View(m.width, m.viewport.Height)
 	} else if m.rewindOverlay != nil {
 		vpView = m.rewindOverlay.View(m.width, m.viewport.Height)
+	} else if m.conversationOverlay != nil {
+		vpView = m.conversationOverlay.View(m.width, m.viewport.Height)
 	} else if m.slashOverlay != nil {
 		overlay := m.slashOverlay.View(m.width)
 		if overlay != "" {
@@ -651,6 +681,11 @@ func (m *Model) View() string {
 		}
 	}
 
+	bypassLine := " "
+	if m.bypassPermissions {
+		bypassLine = bypassStyle.Render("⚡ BYPASS MODE (Shift+Tab to disable)")
+	}
+
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		vpView,
@@ -658,6 +693,7 @@ func (m *Model) View() string {
 		separator,
 		inputArea,
 		separator,
+		bypassLine,
 	)
 }
 

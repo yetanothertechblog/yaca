@@ -29,6 +29,10 @@ var (
 	statusStyle = lipgloss.NewStyle().
 			Foreground(colorDimBrass)
 
+	bypassStyle = lipgloss.NewStyle().
+			Foreground(colorRust).
+			Bold(true)
+
 	spinnerStyle = lipgloss.NewStyle().
 			Foreground(colorBrass)
 
