@@ -311,11 +311,78 @@ func TestLatestInDirEmpty(t *testing.T) {
 	}
 }
 
-// TestDirContainsYacaConversations checks that Dir() returns a path under .yaca/conversations.
-func TestDirContainsYacaConversations(t *testing.T) {
-	d := Dir()
-	if !strings.HasSuffix(d, filepath.Join(".yaca", "conversations")) {
-		t.Errorf("Dir() = %q, want suffix %q", d, filepath.Join(".yaca", "conversations"))
+// TestDirIsYacaConversations checks that Dir() returns ~/.yaca/conversations.
+func TestDirIsYacaConversations(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home directory")
+	}
+	got := Dir()
+	want := filepath.Join(home, ".yaca", "conversations")
+	if got != want {
+		t.Errorf("Dir() = %q, want %q", got, want)
+	}
+}
+
+// TestNewHasUniqueIDs verifies that consecutive New() calls produce different IDs.
+func TestNewHasUniqueIDs(t *testing.T) {
+	a, b := New(), New()
+	if a.ID == b.ID {
+		t.Errorf("expected unique IDs, got %q twice", a.ID)
+	}
+}
+
+// TestNewHasEmptySlices verifies that a new conversation starts with empty arrays.
+func TestNewHasEmptySlices(t *testing.T) {
+	d := New()
+	if string(d.UIMessages) != "[]" {
+		t.Errorf("UIMessages = %s, want []", d.UIMessages)
+	}
+	if string(d.AgentHistory) != "[]" {
+		t.Errorf("AgentHistory = %s, want []", d.AgentHistory)
+	}
+}
+
+// TestLoadMissingFile verifies that loading a non-existent path returns an error.
+func TestLoadMissingFile(t *testing.T) {
+	_, err := Load(filepath.Join(t.TempDir(), "no-such-file.jsonl"))
+	if err == nil {
+		t.Error("expected error, got nil")
+	}
+}
+
+// TestLoadEmptyFile verifies that an empty file returns an error.
+func TestLoadEmptyFile(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	_, err = Load(f.Name())
+	if err == nil {
+		t.Error("expected error for empty file, got nil")
+	}
+}
+
+// TestLoadCorruptHeader verifies that a file with invalid JSON on the first line returns an error.
+func TestLoadCorruptHeader(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "*.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString("not valid json\n")
+	f.Close()
+	_, err = Load(f.Name())
+	if err == nil {
+		t.Error("expected error for corrupt header, got nil")
+	}
+}
+
+// TestLatestInDirMissing verifies that a non-existent directory returns an error.
+func TestLatestInDirMissing(t *testing.T) {
+	_, err := LatestInDir(filepath.Join(t.TempDir(), "no-such-dir"))
+	if err == nil {
+		t.Error("expected error for missing directory, got nil")
 	}
 }
 

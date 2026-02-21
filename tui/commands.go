@@ -8,6 +8,7 @@ import (
 
 	"go-tui/agent"
 	"go-tui/agent/tools"
+	"go-tui/conversation"
 	"go-tui/llm"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -68,6 +69,10 @@ type UserInputMsg struct {
 type ModelSwitchedMsg struct {
 	Name string
 	Err  error
+}
+
+type ResumeConversationMsg struct {
+	Conv *conversation.Data
 }
 
 const (

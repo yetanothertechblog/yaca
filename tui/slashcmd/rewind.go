@@ -12,22 +12,29 @@ func init() {
 }
 
 // RewindOverlay holds the state of the rewind message picker overlay.
+// It is also reused as a generic list picker (e.g. conversation resume).
 type RewindOverlay struct {
+	Title  string // overlay heading; defaults to "Rewind to message" if empty
 	Items  []RewindItem
 	Cursor int
 }
 
-// RewindItem represents a user message that can be rewound to.
+// RewindItem represents a selectable item in the picker overlay.
 type RewindItem struct {
-	Text         string // user message content (truncated for display)
-	FullText     string // full original user message
-	MessageIndex int    // index into m.messages
-	HistoryIndex int    // index into m.history
+	Text         string // display label (truncated)
+	FullText     string // full original text (used when rewinding)
+	MessageIndex int    // index into m.messages (rewind only)
+	HistoryIndex int    // index into m.history  (rewind only)
+	Path         string // file path             (conversation resume only)
 }
 
-// View renders the rewind overlay as a centered box.
+// View renders the picker overlay as a centered box.
 func (r *RewindOverlay) View(width, height int) string {
-	title := overlayTitleStyle.Render("Rewind to message")
+	heading := r.Title
+	if heading == "" {
+		heading = "Rewind to message"
+	}
+	title := overlayTitleStyle.Render(heading)
 
 	// Show a scrollable window of ~10 items around cursor
 	const windowSize = 10

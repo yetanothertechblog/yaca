@@ -160,6 +160,56 @@ func LatestInDir(dir string) (string, error) {
 	return files[len(files)-1], nil
 }
 
+// Preview holds the minimal info needed to display a conversation in a picker.
+type Preview struct {
+	ID       string
+	FirstMsg string // first user message, empty if none
+}
+
+// ReadPreview opens a conversation file and reads only enough to extract the
+// ID and the first user message. It is cheaper than a full Load.
+func ReadPreview(path string) (Preview, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return Preview{}, fmt.Errorf("opening conversation: %w", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 1024*1024), 10*1024*1024)
+
+	if !scanner.Scan() {
+		return Preview{}, fmt.Errorf("empty conversation file")
+	}
+	var h header
+	if err := json.Unmarshal(scanner.Bytes(), &h); err != nil {
+		return Preview{}, fmt.Errorf("parsing header: %w", err)
+	}
+
+	p := Preview{ID: h.ID}
+	for scanner.Scan() {
+		var r record
+		if err := json.Unmarshal(scanner.Bytes(), &r); err != nil {
+			continue
+		}
+		if r.Kind != "ui" {
+			continue
+		}
+		var entry struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		}
+		if json.Unmarshal(r.Data, &entry) != nil {
+			continue
+		}
+		if entry.Role == "user" && entry.Content != "" {
+			p.FirstMsg = entry.Content
+			break
+		}
+	}
+	return p, nil
+}
+
 func Dir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {

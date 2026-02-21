@@ -1,9 +1,12 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 
 	"go-tui/config"
+	"go-tui/conversation"
 	"go-tui/tui/slashcmd"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -13,6 +16,8 @@ import (
 // Returns (true, cmd) if the text was handled as a command, (false, nil) otherwise.
 func (m *Model) executeSlashCommand(text string) (bool, tea.Cmd) {
 	switch text {
+	case "/exit":
+		return true, tea.Quit
 	case "/clear":
 		m.messages = nil
 		m.history = nil
@@ -31,6 +36,8 @@ func (m *Model) executeSlashCommand(text string) (bool, tea.Cmd) {
 		return true, compactHistory(m.history)
 	case "/rewind":
 		return m.executeRewind()
+	case "/resume":
+		return m.executeResume()
 	case "/model":
 		return m.executeModel()
 	case "/help", "/status":
@@ -86,6 +93,57 @@ func (m *Model) executeRewind() (bool, tea.Cmd) {
 	m.rewindOverlay = &slashcmd.RewindOverlay{
 		Items:  items,
 		Cursor: len(items) - 1,
+	}
+	return true, nil
+}
+
+func (m *Model) executeResume() (bool, tea.Cmd) {
+	dir := conversation.Dir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		m.appendError("No conversations found")
+		m.refreshViewport()
+		return true, nil
+	}
+
+	var items []slashcmd.RewindItem
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".jsonl" {
+			continue
+		}
+		path := filepath.Join(dir, e.Name())
+		preview, err := conversation.ReadPreview(path)
+		if err != nil || preview.ID == m.conv.ID {
+			continue
+		}
+		label := strings.ReplaceAll(preview.FirstMsg, "\n", " ")
+		if len(label) > 60 {
+			label = label[:57] + "..."
+		}
+		if label == "" {
+			label = preview.ID
+		}
+		items = append(items, slashcmd.RewindItem{
+			Text: label,
+			Path: path,
+		})
+	}
+
+	if len(items) == 0 {
+		m.appendError("No other conversations to resume")
+		m.refreshViewport()
+		return true, nil
+	}
+
+	// Reverse so newest conversation is at the top
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
+
+	m.conversationOverlay = &slashcmd.RewindOverlay{
+		Title:  "Resume conversation",
+		Items:  items,
+		Cursor: 0,
 	}
 	return true, nil
 }

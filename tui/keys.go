@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go-tui/config"
+	"go-tui/conversation"
 	"go-tui/llm"
 	"go-tui/tui/slashcmd"
 
@@ -16,6 +17,10 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyCtrlC:
 		return m, tea.Quit
+	case tea.KeyShiftTab:
+		m.bypassPermissions = !m.bypassPermissions
+		m.refreshViewport()
+		return m, nil
 	}
 
 	// Handle double ESC for interrupting long-running operations
@@ -46,6 +51,11 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 	// Rewind overlay mode
 	if m.rewindOverlay != nil {
 		return handleRewindOverlayKey(m, msg)
+	}
+
+	// Conversation resume overlay mode
+	if m.conversationOverlay != nil {
+		return handleConversationOverlayKey(m, msg)
 	}
 
 	// Slash overlay mode
@@ -310,6 +320,39 @@ func activateModel(m *Model, name, apiKey string) tea.Cmd {
 		llm.Configure(md.APIURL, apiKey, name)
 		return ModelSwitchedMsg{Name: name}
 	}
+}
+
+func handleConversationOverlayKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyUp:
+		if m.conversationOverlay.Cursor > 0 {
+			m.conversationOverlay.Cursor--
+		}
+		return m, nil
+
+	case tea.KeyDown:
+		if m.conversationOverlay.Cursor < len(m.conversationOverlay.Items)-1 {
+			m.conversationOverlay.Cursor++
+		}
+		return m, nil
+
+	case tea.KeyEsc:
+		m.conversationOverlay = nil
+		return m, nil
+
+	case tea.KeyEnter:
+		item := m.conversationOverlay.Items[m.conversationOverlay.Cursor]
+		m.conversationOverlay = nil
+		return m, func() tea.Msg {
+			conv, err := conversation.Load(item.Path)
+			if err != nil {
+				return InterruptMsg{Reason: "Failed to load conversation: " + err.Error()}
+			}
+			return ResumeConversationMsg{Conv: conv}
+		}
+	}
+
+	return m, nil
 }
 
 func handlePermissionKey(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
