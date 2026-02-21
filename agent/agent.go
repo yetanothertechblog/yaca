@@ -54,6 +54,7 @@ func (a *Agent) SystemPrompt() string {
 	return fmt.Sprintf(systemPromptTemplate, a.workingDir, yacaContent)
 }
 
+// readYacaMarkdown reads the YACA.md file and returns it wrapped in project_info tags
 func (a *Agent) readYacaMarkdown() string {
 	yacaPath := filepath.Join(a.workingDir, "YACA.md")
 	if data, err := os.ReadFile(yacaPath); err == nil {

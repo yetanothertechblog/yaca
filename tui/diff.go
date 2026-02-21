@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"go-tui/config"
-
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
@@ -18,14 +16,11 @@ func renderDiff(d DiffData) string {
 	var sb strings.Builder
 
 	if d.OldText == "" {
-		icon := config.WriteIcon
-		sb.WriteString(diffHeaderStyle.Render(icon + d.FilePath + " (new file)"))
-		sb.WriteString("\n")
-
 		for i, line := range strings.Split(d.NewText, "\n") {
-			num := diffLineNumStyle.Render(fmt.Sprintf("   %4d ", i+1))
-			sb.WriteString(num + diffAddedStyle.Render("+ "+line))
-			sb.WriteString("\n")
+			num := diffAddedLineNumStyle.Render(fmt.Sprintf("   %4d ", i+1))
+			marker := diffAddedMarkerStyle.Render("+")
+			content := diffAddedStyle.Render(" " + line)
+			sb.WriteString(num + marker + content + "\n")
 		}
 		return strings.TrimRight(sb.String(), "\n")
 	}
@@ -37,25 +32,6 @@ func renderDiff(d DiffData) string {
 	oldLine := startLine
 	newLine := startLine
 
-	if d.BlockReplace {
-		// Block replacement: show all old lines as deletions, then all new lines as additions.
-		// Used for edit_file to avoid diffmatchpatch confusion with repeated code.
-		for _, line := range strings.Split(strings.TrimRight(d.OldText, "\n"), "\n") {
-			num := diffLineNumStyle.Render(fmt.Sprintf("%4d ", oldLine))
-			sb.WriteString(num + diffRemovedStyle.Render("- "+line))
-			sb.WriteString("\n")
-			oldLine++
-		}
-		for _, line := range strings.Split(strings.TrimRight(d.NewText, "\n"), "\n") {
-			num := diffLineNumStyle.Render(fmt.Sprintf("%4d ", newLine))
-			sb.WriteString(num + diffAddedStyle.Render("+ "+line))
-			sb.WriteString("\n")
-			newLine++
-		}
-		return strings.TrimRight(sb.String(), "\n")
-	}
-
-	// Smart diff for full file changes (write_file).
 	dmp := diffmatchpatch.New()
 	a, b, lines := dmp.DiffLinesToChars(d.OldText, d.NewText)
 	diffs := dmp.DiffMain(a, b, false)
@@ -96,16 +72,18 @@ func renderDiff(d DiffData) string {
 
 		// Render all deletions first
 		for _, line := range deleted {
-			num := diffLineNumStyle.Render(fmt.Sprintf("%4d ", oldLine))
-			sb.WriteString(num + diffRemovedStyle.Render("- "+line))
-			sb.WriteString("\n")
+			num := diffRemovedLineNumStyle.Render(fmt.Sprintf("%4d ", oldLine))
+			marker := diffRemovedMarkerStyle.Render("-")
+			content := diffRemovedStyle.Render(" " + line)
+			sb.WriteString(num + marker + content + "\n")
 			oldLine++
 		}
 		// Then all additions
 		for _, line := range added {
-			num := diffLineNumStyle.Render(fmt.Sprintf("%4d ", newLine))
-			sb.WriteString(num + diffAddedStyle.Render("+ "+line))
-			sb.WriteString("\n")
+			num := diffAddedLineNumStyle.Render(fmt.Sprintf("%4d ", newLine))
+			marker := diffAddedMarkerStyle.Render("+")
+			content := diffAddedStyle.Render(" " + line)
+			sb.WriteString(num + marker + content + "\n")
 			newLine++
 		}
 	}

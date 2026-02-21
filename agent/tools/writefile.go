@@ -16,7 +16,6 @@ type WriteFileArgs struct {
 
 type WriteFileResult struct {
 	FilePath    string `json:"file_path"`
-	OldContent  string `json:"old_content"`
 	NewContent  string `json:"new_content"`
 	IsNewFile   bool   `json:"is_new_file"`
 	LSPFeedback string `json:"lsp_feedback,omitempty"`
@@ -54,10 +53,8 @@ func executeWriteFile(args WriteFileArgs, workingDir string) (ToolResult, error)
 		path = filepath.Join(workingDir, path)
 	}
 
-	oldContent := ""
 	isNewFile := true
-	if existing, err := os.ReadFile(path); err == nil {
-		oldContent = string(existing)
+	if _, err := os.Stat(path); err == nil {
 		isNewFile = false
 	}
 
@@ -71,10 +68,9 @@ func executeWriteFile(args WriteFileArgs, workingDir string) (ToolResult, error)
 	}
 
 	result := WriteFileResult{
-		FilePath:   args.FilePath,
-		OldContent: oldContent,
+		FilePath:  args.FilePath,
 		NewContent: args.Content,
-		IsNewFile:  isNewFile,
+		IsNewFile: isNewFile,
 	}
 
 	if lsp.DefaultManager != nil {
