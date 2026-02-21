@@ -136,7 +136,7 @@ func New(workingDir string, conv *conversation.Data, s *settings.Settings) Model
 		messages:         messages,
 		agent:            a,
 		conv:             conv,
-		convDir:          conversation.Dir(workingDir),
+		convDir:          conversation.Dir(),
 		markdownRenderer: markdownRenderer,
 		history:          history,
 		workingDir:       workingDir,

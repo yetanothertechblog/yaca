@@ -60,7 +60,7 @@ func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	log.Println("starting go-tui")
 
-	convDir := conversation.Dir(workingDir)
+	convDir := conversation.Dir()
 	var conv *conversation.Data
 
 	if *resume && resumeID == "" {
@@ -70,8 +70,8 @@ func main() {
 			fmt.Printf("No conversations to resume.\n")
 			os.Exit(1)
 		}
-		resumeID = strings.TrimSuffix(latestFile, ".json")
-		path := filepath.Join(convDir, resumeID+".json")
+		resumeID = strings.TrimSuffix(latestFile, ".jsonl")
+		path := filepath.Join(convDir, resumeID+".jsonl")
 		conv, err = conversation.Load(path)
 		if err != nil {
 			fmt.Printf("Error loading conversation: %v\n", err)
@@ -80,7 +80,7 @@ func main() {
 		log.Printf("resumed latest conversation: %s", conv.ID)
 	} else if resumeID != "" {
 		// Explicit UUID provided: go run . -resume <uuid>
-		path := filepath.Join(convDir, resumeID+".json")
+		path := filepath.Join(convDir, resumeID+".jsonl")
 		conv, err = conversation.Load(path)
 		if err != nil {
 			fmt.Printf("Error loading conversation: %v\n", err)
