@@ -6,7 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
+"sync"
 )
 
 const settingsFile = ".yaca/settings.json"
@@ -90,17 +90,17 @@ func (s *Settings) SetActiveModel(name string) error {
 	return s.saveLocked()
 }
 
-// APIKey returns the stored API key for the given model name.
-func (s *Settings) APIKey(model string) string {
+// APIKey returns the stored API key for the given provider key name (e.g. "Z_API").
+func (s *Settings) APIKey(keyName string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.apiKeys[model]
+	return s.apiKeys[keyName]
 }
 
-// SetAPIKey stores an API key for the given model and persists to disk.
-func (s *Settings) SetAPIKey(model, key string) error {
+// SetAPIKey stores an API key under the given provider key name and persists to disk.
+func (s *Settings) SetAPIKey(keyName, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.apiKeys[model] = key
+	s.apiKeys[keyName] = key
 	return s.saveLocked()
 }

@@ -33,7 +33,7 @@ func main() {
 
 	if active := s.ActiveModel(); active != "" {
 		if md := config.ModelByName(active); md != nil {
-			if key := s.APIKey(active); key != "" {
+			if key := s.APIKey(md.APIKeyName); key != "" {
 				llm.Configure(md.APIURL, key, active)
 			}
 		}
@@ -99,6 +99,6 @@ func main() {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("To resume this session run: yaca -resume %s\n", conv.ID)
+	fmt.Printf("To resume this session run: yaca -resume %s\n", m.ConversationID())
 	m.Shutdown()
 }
