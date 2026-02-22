@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"go-tui/config"
@@ -130,4 +133,101 @@ func getDiffForPermission(toolName, argsJSON, workingDir string) string {
 		return ""
 	}
 	return renderDiff(*d)
+}
+
+func parseDiffFromToolCall(toolName, args, result, workingDir string, denied bool) *DiffData {
+	if denied {
+		return parseDiffFromArgs(toolName, args, workingDir)
+	}
+
+	if result == "" {
+		return nil
+	}
+
+	switch toolName {
+	case "edit_file", "write_file":
+		var r struct {
+			FilePath   string `json:"file_path"`
+			OldString  string `json:"old_string"`
+			NewString  string `json:"new_string"`
+			OldContent string `json:"old_content"`
+			NewContent string `json:"new_content"`
+			IsNewFile  bool   `json:"is_new_file"`
+		}
+		if json.Unmarshal([]byte(result), &r) != nil || r.FilePath == "" {
+			return parseDiffFromArgs(toolName, args, workingDir)
+		}
+		old := r.OldString + r.OldContent
+		new_ := r.NewString + r.NewContent
+		startLine := 1
+		if toolName == "edit_file" {
+			path := r.FilePath
+			if !filepath.IsAbs(path) {
+				path = filepath.Join(workingDir, path)
+			}
+			if data, err := os.ReadFile(path); err == nil {
+				startLine = findStartLine(string(data), r.OldString)
+			}
+		}
+		return &DiffData{
+			FilePath:     r.FilePath,
+			OldText:      old,
+			NewText:      new_,
+			StartLine:    startLine,
+			BlockReplace: toolName == "edit_file",
+		}
+	}
+	return nil
+}
+
+func parseDiffFromArgs(name, argsJSON, workingDir string) *DiffData {
+	switch name {
+	case "edit_file":
+		var args struct {
+			FilePath  string `json:"file_path"`
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		}
+		if json.Unmarshal([]byte(argsJSON), &args) != nil || args.FilePath == "" {
+			return nil
+		}
+		startLine := 1
+		path := args.FilePath
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		if data, err := os.ReadFile(path); err == nil {
+			startLine = findStartLine(string(data), args.OldString)
+		}
+		return &DiffData{
+			FilePath:     args.FilePath,
+			OldText:      args.OldString,
+			NewText:      args.NewString,
+			StartLine:    startLine,
+			BlockReplace: true,
+		}
+
+	case "write_file":
+		var args struct {
+			FilePath string `json:"file_path"`
+			Content  string `json:"content"`
+		}
+		if json.Unmarshal([]byte(argsJSON), &args) != nil || args.FilePath == "" {
+			return nil
+		}
+		path := args.FilePath
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		d := &DiffData{
+			FilePath:  args.FilePath,
+			NewText:   args.Content,
+			StartLine: 1,
+		}
+		if data, err := os.ReadFile(path); err == nil {
+			d.OldText = string(data)
+		}
+		return d
+	}
+	return nil
 }
