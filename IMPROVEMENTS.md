@@ -229,22 +229,9 @@ The permission prompt shows the diff, but there's no way to:
 
 ## 🟡 MODERATE ISSUES
 
-### 11. No Conversation Branching
-
-When rewinding, you lose the future messages. No way to:
-- Branch from an earlier point
-- Keep multiple conversation threads
-- Compare different approaches
-
-**Recommendation:**
-- Implement conversation tree structure
-- Add branch visualization in rewind overlay
-- Allow naming branches for easy identification
-- Support merging branches
-
 ---
 
-### 12. Hardcoded Tool Limit
+### 11. Hardcoded Tool Limit
 
 ```go
 // config/constants.go:6
@@ -261,7 +248,7 @@ Arbitrary limit with no configuration. Complex refactoring tasks can hit this.
 
 ---
 
-### 13. No Token Estimation
+### 12. No Token Estimation
 
 Token counting is done post-hoc via API response. No local estimation for:
 - Predicting when context will overflow
@@ -276,7 +263,7 @@ Token counting is done post-hoc via API response. No local estimation for:
 
 ---
 
-### 14. Debug Logging to Working Directory
+### 13. Debug Logging to Working Directory
 
 ```go
 // main.go:48-52
@@ -293,7 +280,7 @@ Creates a `log/` directory in every project. Should use standard OS locations li
 
 ---
 
-### 15. No Model Configuration Discovery
+### 14. No Model Configuration Discovery
 
 ```go
 // config/models.go:14-27
@@ -313,7 +300,7 @@ Models are hardcoded. No:
 
 ---
 
-### 16. Permission System is Coarse
+### 15. Permission System is Coarse
 
 ```go
 // permissions/permissions.go:84-104
@@ -338,7 +325,7 @@ No:
 
 ---
 
-### 17. No Concurrent Tool Execution
+### 16. No Concurrent Tool Execution
 
 Tools execute sequentially:
 ```go
@@ -357,7 +344,7 @@ Independent tools (e.g., reading multiple files) could run in parallel.
 
 ---
 
-### 18. Markdown Rendering is Synchronous
+### 17. Markdown Rendering is Synchronous
 
 ```go
 // tui/model.go:291
@@ -376,7 +363,7 @@ Heavy markdown rendering blocks the UI. Should be offloaded.
 
 ## 🟢 MINOR ISSUES
 
-### 19. No Keyboard Shortcut Customization
+### 18. No Keyboard Shortcut Customization
 
 All keybindings hardcoded in `tui/keys.go`.
 
@@ -387,7 +374,7 @@ All keybindings hardcoded in `tui/keys.go`.
 
 ---
 
-### 20. No Mouse Support Beyond Scrolling
+### 19. No Mouse Support Beyond Scrolling
 
 Can't click to select conversations, models, or permission options.
 
@@ -398,7 +385,7 @@ Can't click to select conversations, models, or permission options.
 
 ---
 
-### 21. Error Messages Expose Internals
+### 20. Error Messages Expose Internals
 
 ```go
 return ToolResult{}, NewToolError(ErrStringNotUnique, "old_string found multiple times",
@@ -414,7 +401,7 @@ Technical error codes exposed to end users.
 
 ---
 
-### 22. No Accessibility Support
+### 21. No Accessibility Support
 
 No screen reader support, no high-contrast mode, no font size adjustment.
 
@@ -426,7 +413,7 @@ No screen reader support, no high-contrast mode, no font size adjustment.
 
 ---
 
-### 23. Compact Uses Separate API Call
+### 22. Compact Uses Separate API Call
 
 ```go
 // tui/commands.go:185-214
@@ -444,7 +431,7 @@ Compact makes a separate API call with the full history, doubling token usage te
 
 ---
 
-### 24. No Export/Import
+### 23. No Export/Import
 
 Conversations stored in custom JSONL format. No export to:
 - Markdown
@@ -459,7 +446,7 @@ Conversations stored in custom JSONL format. No export to:
 
 ---
 
-### 25. No Multi-File Edit Atomicity
+### 24. No Multi-File Edit Atomicity
 
 When editing multiple files, a failure halfway through leaves the codebase in an inconsistent state. No rollback.
 
@@ -477,7 +464,7 @@ When editing multiple files, a failure halfway through leaves the codebase in an
 |----------|----------|-------|
 | 🔴 Critical | Testing, Security, Architecture | 3 |
 | 🟠 Major | UX, Reliability, Safety | 5 |
-| 🟡 Moderate | Features, Configuration | 7 |
+| 🟡 Moderate | Features, Configuration | 6 |
 | 🟢 Minor | Polish, Accessibility | 7 |
 
 ---
