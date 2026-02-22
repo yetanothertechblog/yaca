@@ -231,24 +231,7 @@ The permission prompt shows the diff, but there's no way to:
 
 ---
 
-### 11. Hardcoded Tool Limit
-
-```go
-// config/constants.go:6
-MaxToolRounds = 100
-```
-
-Arbitrary limit with no configuration. Complex refactoring tasks can hit this.
-
-**Recommendation:**
-- Make limit configurable via settings
-- Consider per-model limits based on context
-- Add warning when approaching limit
-- Allow user to continue if they choose
-
----
-
-### 12. No Token Estimation
+### 11. No Token Estimation
 
 Token counting is done post-hoc via API response. No local estimation for:
 - Predicting when context will overflow
@@ -263,88 +246,7 @@ Token counting is done post-hoc via API response. No local estimation for:
 
 ---
 
-### 13. Debug Logging to Working Directory
-
-```go
-// main.go:48-52
-logDir := filepath.Join(workingDir, "log")
-```
-
-Creates a `log/` directory in every project. Should use standard OS locations like `~/.yaca/logs/` or system temp.
-
-**Recommendation:**
-- Use `~/.yaca/logs/` for all logs
-- Or use OS-specific log directories (e.g., `/var/log/` on Linux)
-- Add log rotation to prevent disk bloat
-- Consider structured logging (JSON) for easier parsing
-
----
-
-### 14. No Model Configuration Discovery
-
-```go
-// config/models.go:14-27
-var SupportedModels = []ModelDef{...}
-```
-
-Models are hardcoded. No:
-- Dynamic model discovery from API
-- Custom model configuration file
-- Ollama/local model support
-
-**Recommendation:**
-- Add configuration file for custom models
-- Implement API-based model discovery
-- Support Ollama and other local model providers
-- Allow model-specific system prompts
-
----
-
-### 15. Permission System is Coarse
-
-```go
-// permissions/permissions.go:84-104
-func (p *Permissions) IsAllowed(toolName string, argsJSON string) bool {
-```
-
-Only supports:
-- Full tool allowlisting
-- Bash command prefix matching
-
-No:
-- Path-based permissions for file tools
-- Argument inspection for read vs write
-- Time-limited grants
-
-**Recommendation:**
-- Implement path-based permissions for file operations
-- Add read/write distinction in permissions
-- Support glob patterns for path matching
-- Add session-based permissions (auto-expire)
-- Implement permission scopes (full project, specific directories, etc.)
-
----
-
-### 16. No Concurrent Tool Execution
-
-Tools execute sequentially:
-```go
-// tui/model.go:510-512
-m.pendingToolIndex++
-cmd := m.dispatchNextTool()
-```
-
-Independent tools (e.g., reading multiple files) could run in parallel.
-
-**Recommendation:**
-- Analyze tool dependencies
-- Execute independent tools concurrently
-- Add concurrency limit (e.g., max 3 parallel tools)
-- Show parallel execution in UI
-
----
-
-### 17. Markdown Rendering is Synchronous
+### 12. Markdown Rendering is Synchronous
 
 ```go
 // tui/model.go:291
@@ -363,7 +265,7 @@ Heavy markdown rendering blocks the UI. Should be offloaded.
 
 ## 🟢 MINOR ISSUES
 
-### 18. No Keyboard Shortcut Customization
+### 13. No Keyboard Shortcut Customization
 
 All keybindings hardcoded in `tui/keys.go`.
 
@@ -374,18 +276,7 @@ All keybindings hardcoded in `tui/keys.go`.
 
 ---
 
-### 19. No Mouse Support Beyond Scrolling
-
-Can't click to select conversations, models, or permission options.
-
-**Recommendation:**
-- Add clickable UI elements
-- Support mouse selection in overlays
-- Add hover effects where applicable
-
----
-
-### 20. Error Messages Expose Internals
+### 14. Error Messages Expose Internals
 
 ```go
 return ToolResult{}, NewToolError(ErrStringNotUnique, "old_string found multiple times",
@@ -401,19 +292,7 @@ Technical error codes exposed to end users.
 
 ---
 
-### 21. No Accessibility Support
-
-No screen reader support, no high-contrast mode, no font size adjustment.
-
-**Recommendation:**
-- Add screen reader announcements
-- Implement high-contrast theme
-- Make font size configurable
-- Add keyboard navigation hints
-
----
-
-### 22. Compact Uses Separate API Call
+### 15. Compact Uses Separate API Call
 
 ```go
 // tui/commands.go:185-214
@@ -431,7 +310,7 @@ Compact makes a separate API call with the full history, doubling token usage te
 
 ---
 
-### 23. No Export/Import
+### 16. No Export/Import
 
 Conversations stored in custom JSONL format. No export to:
 - Markdown
@@ -446,26 +325,14 @@ Conversations stored in custom JSONL format. No export to:
 
 ---
 
-### 24. No Multi-File Edit Atomicity
-
-When editing multiple files, a failure halfway through leaves the codebase in an inconsistent state. No rollback.
-
-**Recommendation:**
-- Implement transaction-like edit batching
-- Add automatic rollback on failure
-- Create backup before multi-file edits
-- Add "undo last changes" command
-
----
-
 ## Summary Priority Matrix
 
 | Priority | Category | Count |
 |----------|----------|-------|
 | 🔴 Critical | Testing, Security, Architecture | 3 |
 | 🟠 Major | UX, Reliability, Safety | 5 |
-| 🟡 Moderate | Features, Configuration | 6 |
-| 🟢 Minor | Polish, Accessibility | 7 |
+| 🟡 Moderate | Features, Configuration | 2 |
+| 🟢 Minor | Polish, Accessibility | 4 |
 
 ---
 
