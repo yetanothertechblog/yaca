@@ -56,11 +56,13 @@ func executeBashContext(ctx context.Context, args BashArgs, workingDir string) (
 
 	err := cmd.Run()
 
-	// Check if context was cancelled
-	if cmdCtx.Err() == context.DeadlineExceeded {
+	// Capture context error once to avoid TOCTOU race — the context state
+	// could change between successive checks of cmdCtx.Err().
+	ctxErr := cmdCtx.Err()
+	if ctxErr == context.DeadlineExceeded {
 		return ToolResult{}, fmt.Errorf("command timed out after %v", bashTimeout)
 	}
-	if cmdCtx.Err() == context.Canceled {
+	if ctxErr == context.Canceled {
 		return ToolResult{}, ctx.Err()
 	}
 

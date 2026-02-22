@@ -40,5 +40,9 @@ func ExecuteContext(ctx context.Context, name string, argsJSON string, workingDi
 	if !ok {
 		return ToolResult{}, fmt.Errorf("unknown tool: %s", name)
 	}
-	return t.ExecuteContext(ctx, argsJSON, workingDir)
+	// Use context-aware execution if the tool supports it; otherwise fall back.
+	if ce, ok := t.(ContextExecutor); ok {
+		return ce.ExecuteContext(ctx, argsJSON, workingDir)
+	}
+	return t.Execute(argsJSON, workingDir)
 }

@@ -171,19 +171,7 @@ No retries, no exponential backoff, no rate limiting, no circuit breaker. Networ
 - All tools can now be cancelled mid-execution
 - Context cancellation errors are logged and handled cleanly
 
-~~```go
-// tui/commands.go:179-181
-case <-interruptCh:
-    return InterruptMsg{Reason: "User interrupted"}
-```
-
-When user interrupts, the goroutine running `llm.CallLLMStream` continues running, consuming tokens and holding resources. No proper cancellation context.
-
-**Recommendation:**
-- Use `context.Context` for cancellation propagation
-- Ensure HTTP request is cancelled when interrupted
-- Clean up resources properly on interruption
-- Consider implementing graceful shutdown for in-flight operations~~
+**Previous problem:** When user interrupted, the goroutine running `llm.CallLLMStream` continued running, consuming tokens and holding resources. Now properly cancelled via `context.Context`.
 
 ---
 

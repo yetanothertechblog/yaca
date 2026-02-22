@@ -19,6 +19,11 @@ type ToolImpl interface {
 	Description() string
 	Schema() json.RawMessage
 	Execute(argsJSON string, workingDir string) (ToolResult, error)
+}
+
+// ContextExecutor is an optional interface that tools can implement to support
+// context-based cancellation. Tools that don't implement it fall back to Execute.
+type ContextExecutor interface {
 	ExecuteContext(ctx context.Context, argsJSON string, workingDir string) (ToolResult, error)
 }
 

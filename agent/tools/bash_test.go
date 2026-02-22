@@ -1,8 +1,10 @@
 package tools
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExecuteBash(t *testing.T) {
@@ -108,6 +110,46 @@ func TestExecuteBash(t *testing.T) {
 			!strings.Contains(result.Output, "line2") ||
 			!strings.Contains(result.Output, "line3") {
 			t.Errorf("Expected all three lines in output, got '%s'", result.Output)
+		}
+	})
+}
+
+func TestExecuteBashContext_Cancellation(t *testing.T) {
+	t.Run("respects context cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately
+
+		args := BashArgs{Command: "sleep 60"}
+		start := time.Now()
+		_, err := executeBashContext(ctx, args, "/tmp")
+		elapsed := time.Since(start)
+
+		if err == nil {
+			t.Fatal("expected error from cancelled context")
+		}
+		if elapsed > 5*time.Second {
+			t.Errorf("cancellation took too long: %v", elapsed)
+		}
+	})
+
+	t.Run("cancel during execution returns quickly", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			cancel()
+		}()
+
+		args := BashArgs{Command: "sleep 60"}
+		start := time.Now()
+		_, err := executeBashContext(ctx, args, "/tmp")
+		elapsed := time.Since(start)
+
+		if err == nil {
+			t.Fatal("expected error from cancelled context")
+		}
+		if elapsed > 5*time.Second {
+			t.Errorf("cancellation took too long: %v", elapsed)
 		}
 	})
 }

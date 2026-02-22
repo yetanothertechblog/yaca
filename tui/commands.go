@@ -277,6 +277,9 @@ func executeToolInterruptible(a *agent.Agent, tc llm.ToolCall, interruptCh <-cha
 			return <-done
 		}
 
+		// If the tool completes at the exact moment an interrupt fires, the
+		// select may take the interruptCh branch, discarding the result. The
+		// buffered done channel (size 1) ensures the goroutine never leaks.
 		select {
 		case msg := <-done:
 			return msg
