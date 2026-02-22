@@ -71,6 +71,18 @@ func handleKeyMsg(m *Model, msg tea.KeyMsg) (*Model, tea.Cmd) {
 	case tea.KeyPgDown:
 		m.viewport.ViewDown()
 		return m, nil
+	case tea.KeyUp:
+		// Scroll up when waiting (textarea doesn't need input)
+		if m.waiting {
+			m.viewport.LineUp(1)
+			return m, nil
+		}
+	case tea.KeyDown:
+		// Scroll down when waiting (textarea doesn't need input)
+		if m.waiting {
+			m.viewport.LineDown(1)
+			return m, nil
+		}
 	}
 
 	switch msg.Type {

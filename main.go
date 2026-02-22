@@ -99,6 +99,6 @@ func main() {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("To resume this session run: yaca -resume %s\n", conv.ID)
+	fmt.Printf("To resume this session run: yaca -resume %s\n", m.ConversationID())
 	m.Shutdown()
 }

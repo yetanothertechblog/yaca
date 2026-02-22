@@ -153,6 +153,11 @@ func (m *Model) Shutdown() {
 	m.agent.Shutdown()
 }
 
+// ConversationID returns the ID of the current conversation.
+func (m *Model) ConversationID() string {
+	return m.conv.ID
+}
+
 func (m *Model) saveConversation() {
 	uiJSON, err := json.Marshal(m.messages)
 	if err != nil {
