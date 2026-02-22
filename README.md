@@ -32,7 +32,7 @@ To download the release binary and run, follow the instructions in the release s
 
 Heres a demo using GLM-4.5 Air
 
-![Demo](https://raw.githubusercontent.com/yetanothertechblog/yaca/main/yaca-demo.gif)  
+![Demo](https://github.com/yetanothertechblog/yaca/blob/9359ddb22da65d4d16042e738d9c423898e2d846/yaca-demo.gif)  
 
 ### Available Tools
 The AI assistant has access to these tools - adding more was just hurting performance, Keep It Simple, Stupid
