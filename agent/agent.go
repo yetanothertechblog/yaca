@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,6 +66,10 @@ func (a *Agent) readYacaMarkdown() string {
 
 func (a *Agent) ExecuteTool(name, argsJSON string) (tools.ToolResult, error) {
 	return tools.Execute(name, argsJSON, a.workingDir)
+}
+
+func (a *Agent) ExecuteToolContext(ctx context.Context, name, argsJSON string) (tools.ToolResult, error) {
+	return tools.ExecuteContext(ctx, name, argsJSON, a.workingDir)
 }
 
 func (a *Agent) Tools() []llm.Tool {

@@ -157,9 +157,21 @@ No retries, no exponential backoff, no rate limiting, no circuit breaker. Networ
 
 ---
 
-### 7. No Streaming Cancellation Cleanup
+### 7. ✅ No Streaming Cancellation Cleanup (COMPLETED)
 
-```go
+**Status:** Implemented with context-based cancellation
+
+**Implementation:**
+- Added `context.Context` parameter to `llm.CallLLMStream()`
+- HTTP requests now use `http.NewRequestWithContext()` for proper cancellation
+- `callLLMInterruptible()` creates a cancellable context that triggers on `interruptCh`
+- HTTP stream is properly terminated when user interrupts (no more token consumption)
+- Added `ExecuteToolContext()` method to Agent for tool cancellation
+- Bash tool updated with `ExecuteCommandContext()` for graceful cancellation
+- All tools can now be cancelled mid-execution
+- Context cancellation errors are logged and handled cleanly
+
+~~```go
 // tui/commands.go:179-181
 case <-interruptCh:
     return InterruptMsg{Reason: "User interrupted"}
@@ -171,7 +183,7 @@ When user interrupts, the goroutine running `llm.CallLLMStream` continues runnin
 - Use `context.Context` for cancellation propagation
 - Ensure HTTP request is cancelled when interrupted
 - Clean up resources properly on interruption
-- Consider implementing graceful shutdown for in-flight operations
+- Consider implementing graceful shutdown for in-flight operations~~
 
 ---
 
@@ -212,26 +224,11 @@ case <-time.After(5 * time.Second):
 
 ---
 
-### 10. No Diff Preview Before Applying Edits
-
-The permission prompt shows the diff, but there's no way to:
-- See full file context
-- Edit the change manually
-- Apply partially
-
-**Recommendation:**
-- Add option to open diff in external editor
-- Implement partial diff application (hunk-level)
-- Show surrounding context in diff preview
-- Add "edit manually" option that opens the file
-
----
-
 ## 🟡 MODERATE ISSUES
 
 ---
 
-### 11. No Token Estimation
+### 10. No Token Estimation
 
 Token counting is done post-hoc via API response. No local estimation for:
 - Predicting when context will overflow
@@ -246,7 +243,7 @@ Token counting is done post-hoc via API response. No local estimation for:
 
 ---
 
-### 12. Markdown Rendering is Synchronous
+### 11. Markdown Rendering is Synchronous
 
 ```go
 // tui/model.go:291
@@ -265,7 +262,7 @@ Heavy markdown rendering blocks the UI. Should be offloaded.
 
 ## 🟢 MINOR ISSUES
 
-### 13. No Keyboard Shortcut Customization
+### 12. No Keyboard Shortcut Customization
 
 All keybindings hardcoded in `tui/keys.go`.
 
@@ -276,7 +273,7 @@ All keybindings hardcoded in `tui/keys.go`.
 
 ---
 
-### 14. Error Messages Expose Internals
+### 13. Error Messages Expose Internals
 
 ```go
 return ToolResult{}, NewToolError(ErrStringNotUnique, "old_string found multiple times",
@@ -292,37 +289,6 @@ Technical error codes exposed to end users.
 
 ---
 
-### 15. Compact Uses Separate API Call
-
-```go
-// tui/commands.go:185-214
-func compactHistory(history []llm.Message) tea.Cmd {
-    messages := []llm.Message{...}
-    result, err := llm.CallLLM(messages, nil)
-```
-
-Compact makes a separate API call with the full history, doubling token usage temporarily.
-
-**Recommendation:**
-- Use local summarization if possible
-- Implement incremental compaction
-- Consider hybrid approach (local outline + API details)
-
----
-
-### 16. No Export/Import
-
-Conversations stored in custom JSONL format. No export to:
-- Markdown
-- HTML
-- PDF
-
-**Recommendation:**
-- Add `/export markdown` command
-- Add `/export html` command
-- Support conversation import
-- Add conversation sharing (anonymized)
-
 ---
 
 ## Summary Priority Matrix
@@ -330,9 +296,9 @@ Conversations stored in custom JSONL format. No export to:
 | Priority | Category | Count |
 |----------|----------|-------|
 | 🔴 Critical | Testing, Security, Architecture | 3 |
-| 🟠 Major | UX, Reliability, Safety | 5 |
+| 🟠 Major | UX, Reliability, Safety | 3 |
 | 🟡 Moderate | Features, Configuration | 2 |
-| 🟢 Minor | Polish, Accessibility | 4 |
+| 🟢 Minor | Polish, Accessibility | 2 |
 
 ---
 

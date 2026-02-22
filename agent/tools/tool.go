@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -18,6 +19,7 @@ type ToolImpl interface {
 	Description() string
 	Schema() json.RawMessage
 	Execute(argsJSON string, workingDir string) (ToolResult, error)
+	ExecuteContext(ctx context.Context, argsJSON string, workingDir string) (ToolResult, error)
 }
 
 // Typed is a generic adapter that handles json.Unmarshal once.
@@ -26,6 +28,7 @@ type Typed[A any] struct {
 	ToolDescription string
 	ToolSchema      json.RawMessage
 	Run             func(args A, workingDir string) (ToolResult, error)
+	RunContext      func(ctx context.Context, args A, workingDir string) (ToolResult, error)
 }
 
 func (t Typed[A]) Name() string              { return t.ToolName }
@@ -38,6 +41,26 @@ func (t Typed[A]) Execute(argsJSON string, workingDir string) (ToolResult, error
 		return ToolResult{}, fmt.Errorf("invalid arguments: %w", err)
 	}
 	return t.Run(args, workingDir)
+}
+
+func (t Typed[A]) ExecuteContext(ctx context.Context, argsJSON string, workingDir string) (ToolResult, error) {
+	var args A
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return ToolResult{}, fmt.Errorf("invalid arguments: %w", err)
+	}
+
+	// If RunContext is not defined, fall back to Run and ignore context
+	if t.RunContext == nil {
+		return t.Run(args, workingDir)
+	}
+
+	// Check if context is already cancelled before running
+	select {
+	case <-ctx.Done():
+		return ToolResult{}, ctx.Err()
+	default:
+		return t.RunContext(ctx, args, workingDir)
+	}
 }
 
 // ToLLMTool converts a ToolImpl to the wire format used by the LLM client.

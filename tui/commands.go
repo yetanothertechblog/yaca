@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"log"
 	"strings"
 	"sync"
@@ -101,6 +102,20 @@ func callLLMInterruptible(a *agent.Agent, history []llm.Message, interruptCh <-c
 	go func() {
 		defer close(ch)
 
+		// Create a context that can be cancelled when interruptCh is triggered
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Watch for interruption and cancel the context
+		go func() {
+			select {
+			case <-interruptCh:
+				cancel()
+			case <-ctx.Done():
+				// Context already cancelled, nothing to do
+			}
+		}()
+
 		var mu sync.Mutex
 		var buf strings.Builder
 		var thinkingBuf strings.Builder
@@ -141,7 +156,7 @@ func callLLMInterruptible(a *agent.Agent, history []llm.Message, interruptCh <-c
 			mu.Unlock()
 		}
 
-		result, err := llm.CallLLMStream(messages, tools.All(), onContent)
+		result, err := llm.CallLLMStream(ctx, messages, tools.All(), onContent)
 
 		// Cancel the pending timer and flush any remaining buffered content.
 		mu.Lock()
@@ -153,6 +168,11 @@ func callLLMInterruptible(a *agent.Agent, history []llm.Message, interruptCh <-c
 		send()
 
 		if err != nil {
+			// Check if the error was due to cancellation
+			if ctx.Err() == context.Canceled {
+				log.Printf("llm stream cancelled by user")
+				return
+			}
 			log.Printf("llm error: %v", err)
 			ch <- LLMResponseMsg{Err: err}
 			return
@@ -221,9 +241,19 @@ func executeToolInterruptible(a *agent.Agent, tc llm.ToolCall, interruptCh <-cha
 
 	return func() tea.Msg {
 		done := make(chan tea.Msg, 1)
+
+		// Create a context for tool cancellation
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		go func() {
-			result, err := a.ExecuteTool(name, args)
+			result, err := a.ExecuteToolContext(ctx, name, args)
 			if err != nil {
+				// Check if the error was due to cancellation
+				if ctx.Err() == context.Canceled {
+					log.Printf("tool %s cancelled by user", name)
+					return
+				}
 				log.Printf("tool error: %v", err)
 				done <- ToolResultMsg{
 					ToolCallID: id,
@@ -246,10 +276,12 @@ func executeToolInterruptible(a *agent.Agent, tc llm.ToolCall, interruptCh <-cha
 		if interruptCh == nil {
 			return <-done
 		}
+
 		select {
 		case msg := <-done:
 			return msg
 		case <-interruptCh:
+			cancel()
 			return InterruptMsg{Reason: "Operation interrupted by user"}
 		}
 	}

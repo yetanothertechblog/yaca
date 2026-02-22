@@ -119,17 +119,17 @@ func doCallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 
 // CallLLMStream uses the circuit breaker but does NOT retry, since partial
 // content may have already been streamed to the caller.
-func CallLLMStream(messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
+func CallLLMStream(ctx context.Context, messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
 	var result *LLMResult
 	err := breaker.Execute(func() error {
 		var err error
-		result, err = doCallLLMStream(messages, tools, onContent)
+		result, err = doCallLLMStream(ctx, messages, tools, onContent)
 		return err
 	})
 	return result, err
 }
 
-func doCallLLMStream(messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
+func doCallLLMStream(ctx context.Context, messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
 	url, key, model := getConfig()
 	if url == "" || key == "" || model == "" {
 		return nil, fmt.Errorf("LLM not configured: call Configure() first")
@@ -147,7 +147,7 @@ func doCallLLMStream(messages []Message, tools []Tool, onContent func(string, bo
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
