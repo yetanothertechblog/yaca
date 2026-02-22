@@ -3,11 +3,16 @@ package llm
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
+
+	"go-tui/circuit"
+	"go-tui/config"
+	"go-tui/retry"
 )
 
 var (
@@ -15,6 +20,7 @@ var (
 	activeURL string
 	activeKey string
 	activeModel string
+	breaker   = circuit.NewDefault() // Global circuit breaker for LLM calls
 )
 
 // Configure sets the active model configuration used by CallLLM and CallLLMStream.
@@ -32,7 +38,37 @@ func getConfig() (string, string, string) {
 	return activeURL, activeKey, activeModel
 }
 
+// GetCircuitBreakerStats returns the current circuit breaker statistics
+func GetCircuitBreakerStats() circuit.Stats {
+	return breaker.GetStats()
+}
+
+// ResetCircuitBreaker manually resets the circuit breaker to CLOSED state
+// This can be useful after manual intervention or configuration changes
+func ResetCircuitBreaker() {
+	breaker.Reset()
+}
+
 func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
+	result, err := circuit.ExecuteWithResult(breaker, context.Background(), func() (*LLMResult, error) {
+		var innerResult *LLMResult
+		err := retry.Do(context.Background(), retry.Config{
+			MaxAttempts: config.MaxRetryAttempts,
+			BaseDelay:   config.RetryBaseDelay,
+			MaxDelay:    config.RetryMaxDelay,
+			Jitter:      config.RetryJitter,
+		}, func() error {
+			var err error
+			innerResult, err = doCallLLM(messages, tools)
+			return err
+		})
+		return innerResult, err
+	})
+	return result, err
+}
+
+// doCallLLM performs the actual LLM HTTP call without retry logic
+func doCallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 	url, key, model := getConfig()
 	if url == "" || key == "" || model == "" {
 		return nil, fmt.Errorf("LLM not configured: call Configure() first")
@@ -85,6 +121,25 @@ func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 }
 
 func CallLLMStream(messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
+	result, err := circuit.ExecuteWithResult(breaker, context.Background(), func() (*LLMResult, error) {
+		var innerResult *LLMResult
+		err := retry.Do(context.Background(), retry.Config{
+			MaxAttempts: config.MaxRetryAttempts,
+			BaseDelay:   config.RetryBaseDelay,
+			MaxDelay:    config.RetryMaxDelay,
+			Jitter:      config.RetryJitter,
+		}, func() error {
+			var err error
+			innerResult, err = doCallLLMStream(messages, tools, onContent)
+			return err
+		})
+		return innerResult, err
+	})
+	return result, err
+}
+
+// doCallLLMStream performs the actual LLM streaming HTTP call without retry logic
+func doCallLLMStream(messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
 	url, key, model := getConfig()
 	if url == "" || key == "" || model == "" {
 		return nil, fmt.Errorf("LLM not configured: call Configure() first")

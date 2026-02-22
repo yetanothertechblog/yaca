@@ -1,5 +1,7 @@
 package config
 
+import "time"
+
 // Configuration constants for the application
 const (
 	// LLM Configuration
@@ -25,6 +27,17 @@ const (
 
 	// API Configuration
 	MaxContextTokens = 128000
+
+	// Retry Configuration
+	MaxRetryAttempts  = 3                    // Maximum number of retry attempts
+	RetryBaseDelay    = 500 * time.Millisecond // Initial delay before first retry
+	RetryMaxDelay     = 10 * time.Second      // Maximum delay between retries
+	RetryJitter       = 0.1                   // Jitter factor to add randomness to delays
+
+	// Circuit Breaker Configuration
+	CircuitMaxFailures     = 5                   // Number of consecutive failures to open the circuit
+	CircuitSuccessThreshold = 2                  // Number of successes needed in half-open to close the circuit
+	CircuitOpenTimeout     = 30 * time.Second    // Duration to wait before transitioning from OPEN to HALF_OPEN
 
 	// File Permissions
 	DirPermissions  = 0o755 // Directory permissions
