@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -191,97 +189,6 @@ func (m *Model) appendError(errMsg string) {
 	}
 }
 
-func parseDiffFromToolCall(toolName, args, result, workingDir string, denied bool) *DiffData {
-	if denied {
-		return parseDiffFromArgs(toolName, args, workingDir)
-	}
-
-	if result == "" {
-		return nil
-	}
-
-	switch toolName {
-	case "write_file":
-		var r struct {
-			FilePath   string `json:"file_path"`
-			NewContent string `json:"new_content"`
-		}
-		if json.Unmarshal([]byte(result), &r) != nil || r.FilePath == "" {
-			return parseDiffFromArgs(toolName, args, workingDir)
-		}
-		return &DiffData{
-			FilePath: r.FilePath,
-			NewText:  r.NewContent,
-		}
-	case "edit_file":
-		var r struct {
-			FilePath  string `json:"file_path"`
-			OldString string `json:"old_string"`
-			NewString string `json:"new_string"`
-		}
-		if json.Unmarshal([]byte(result), &r) != nil || r.FilePath == "" {
-			return parseDiffFromArgs(toolName, args, workingDir)
-		}
-		startLine := 1
-		path := r.FilePath
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(workingDir, path)
-		}
-		if data, err := os.ReadFile(path); err == nil {
-			startLine = findStartLine(string(data), r.OldString)
-		}
-		return &DiffData{
-			FilePath:  r.FilePath,
-			OldText:   r.OldString,
-			NewText:   r.NewString,
-			StartLine: startLine,
-		}
-	}
-	return nil
-}
-
-func parseDiffFromArgs(name, argsJSON, workingDir string) *DiffData {
-	switch name {
-	case "edit_file":
-		var args struct {
-			FilePath  string `json:"file_path"`
-			OldString string `json:"old_string"`
-			NewString string `json:"new_string"`
-		}
-		if json.Unmarshal([]byte(argsJSON), &args) != nil || args.FilePath == "" {
-			return nil
-		}
-		startLine := 1
-		path := args.FilePath
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(workingDir, path)
-		}
-		if data, err := os.ReadFile(path); err == nil {
-			startLine = findStartLine(string(data), args.OldString)
-		}
-		return &DiffData{
-			FilePath:  args.FilePath,
-			OldText:   args.OldString,
-			NewText:   args.NewString,
-			StartLine: startLine,
-		}
-
-	case "write_file":
-		var args struct {
-			FilePath string `json:"file_path"`
-			Content  string `json:"content"`
-		}
-		if json.Unmarshal([]byte(argsJSON), &args) != nil || args.FilePath == "" {
-			return nil
-		}
-		return &DiffData{
-			FilePath: args.FilePath,
-			NewText:  args.Content,
-		}
-	}
-	return nil
-}
-
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(textarea.Blink, spinner.Tick)
 }
@@ -297,46 +204,7 @@ func (m *Model) refreshViewport() {
 	m.viewport.GotoBottom()
 }
 
-// dispatchNextTool returns a Cmd to execute the next pending tool call,
-// or starts the next LLM round if all tools are done.
-func (m *Model) dispatchNextTool() tea.Cmd {
-	if m.pendingToolIndex >= len(m.pendingToolCalls) {
-		// All tools done for this round
-		m.pendingToolCalls = nil
-		m.pendingToolIndex = 0
-		if m.toolRoundCount >= maxToolRounds {
-			m.waiting = false
-			m.textarea.Focus()
-			m.appendError("Tool call limit reached")
-			m.saveConversation()
-			m.refreshViewport()
-			return nil
-		}
-		// Start next LLM round
-		return callLLMInterruptible(m.agent, m.history, m.interruptCh)
-	}
-
-	tc := m.pendingToolCalls[m.pendingToolIndex]
-
-	if m.bypassPermissions || m.permissions.IsAllowed(tc.Function.Name, tc.Function.Arguments) {
-		return executeToolInterruptible(m.agent, tc, m.interruptCh)
-	}
-
-	// Need permission
-	m.awaitingPermission = &tc
-	m.permission = &PermissionPrompt{
-		ToolName:   tc.Function.Name,
-		Args:       tc.Function.Arguments,
-		Cursor:     0,
-		WorkingDir: m.workingDir,
-	}
-	m.refreshViewport()
-	return nil
-}
-
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
-
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
@@ -369,286 +237,37 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case tea.KeyMsg:
-		var cmd tea.Cmd
-		m, cmd = handleKeyMsg(m, msg)
-		return m, cmd
+		return handleKeyMsg(m, msg)
 
 	case StreamChunkMsg:
-		m.streamingThinking = msg.Thinking
-		m.streamingTokens += int(float64(len(strings.Fields(msg.Content))) * 0.75)
-		m.streamingContent += msg.Content
-		m.streamingThinkingContent += msg.ThinkingContent
-		m.refreshViewport()
-		return m, waitForStreamInterruptible(msg.ch, m.interruptCh)
+		return m.handleStreamChunk(msg)
 
 	case LLMResponseMsg:
-		m.streamingContent = ""
-		m.streamingThinkingContent = ""
-		m.streamingTokens = 0
-		m.streamingThinking = false
-		if msg.Usage != nil {
-			m.totalTokens = msg.Usage.TotalTokens
-		}
-		if msg.Err != nil {
-			m.waiting = false
-			m.textarea.Focus()
-			m.appendError(msg.Err.Error())
-			m.saveConversation()
-			m.refreshViewport()
-			return m, nil
-		}
-
-		if len(msg.ToolCalls) == 0 {
-			// No tools — plain assistant response
-			m.waiting = false
-			m.textarea.Focus()
-			m.history = append(m.history, llm.Message{
-				Role:    "assistant",
-				Content: msg.Content,
-			})
-			if strings.TrimSpace(msg.Content) != "" || msg.ReasoningContent != "" {
-				m.messages = append(m.messages, ChatEntry{
-					Type:             EntryMessage,
-					Role:             "assistant",
-					Content:          msg.Content,
-					ReasoningContent: msg.ReasoningContent,
-				})
-			}
-			m.saveConversation()
-			m.refreshViewport()
-			return m, nil
-		}
-
-		// Has tool calls — append assistant message with both content and tool calls
-		m.history = append(m.history, llm.Message{
-			Role:      "assistant",
-			Content:   msg.Content,
-			ToolCalls: msg.ToolCalls,
-		})
-
-		// If there's meaningful content alongside tool calls, show it
-		if strings.TrimSpace(msg.Content) != "" || msg.ReasoningContent != "" {
-			m.messages = append(m.messages, ChatEntry{
-				Type:             EntryMessage,
-				Role:             "assistant",
-				Content:          msg.Content,
-				ReasoningContent: msg.ReasoningContent,
-			})
-		}
-
-		m.pendingToolCalls = msg.ToolCalls
-		m.pendingToolIndex = 0
-		m.toolRoundCount++
-		log.Printf("LLM round %d: %d tool calls, content=%q", m.toolRoundCount, len(msg.ToolCalls), msg.Content)
-		m.refreshViewport()
-
-		cmd := m.dispatchNextTool()
-		return m, cmd
+		return m.handleLLMResponse(msg)
 
 	case CompactResultMsg:
-		m.waiting = false
-		m.textarea.Focus()
-		if msg.Err != nil {
-			m.appendError("Compact failed: " + msg.Err.Error())
-			m.refreshViewport()
-			return m, nil
-		}
-		m.history = []llm.Message{
-			{
-				Role:    "user",
-				Content: "[Conversation summary]\n" + msg.Summary,
-			},
-		}
-		m.messages = []ChatEntry{
-			{
-				Type:    EntryMessage,
-				Role:    "assistant",
-				Content: "Conversation compacted:\n\n" + msg.Summary,
-			},
-		}
-		if msg.Usage != nil {
-			m.totalTokens = msg.Usage.TotalTokens
-		}
-		m.saveConversation()
-		m.refreshViewport()
-		return m, nil
+		return m.handleCompactResult(msg)
 
 	case ToolResultMsg:
-		command := msg.ToolName + ": " + msg.Args
-		resultStr := msg.Result
-
-		// Limit list_files output to 3 lines for display
-		if msg.ToolName == "list_files" {
-			lines := strings.Split(msg.Result, "\n")
-			if len(lines) > 4 { // 3 lines + empty line
-				resultStr = strings.Join(lines[:4], "\n") + "\n... (showing first 3 entries)"
-			}
-		}
-
-		if msg.Err != nil {
-			m.consecutiveErrors++
-			if m.consecutiveErrors >= maxConsecutiveErrors {
-				resultStr += " (Too many consecutive errors. Stop retrying and tell the user what went wrong.)"
-			}
-		} else {
-			m.consecutiveErrors = 0
-		}
-
-		// Append tool result to history
-		m.history = append(m.history, llm.Message{
-			Role:       "tool",
-			Content:    resultStr,
-			ToolCallID: msg.ToolCallID,
-		})
-
-		// Append tool call entry to UI messages
-		entry := ChatEntry{
-			Type:    EntryToolCall,
-			Command: command,
-			Result:  msg.Result,
-			Diff:    parseDiffFromToolCall(msg.ToolName, msg.Args, msg.Result, m.workingDir, false),
-		}
-		m.messages = append(m.messages, entry)
-		m.saveConversation()
-		m.refreshViewport()
-
-		// Advance to next tool
-		m.pendingToolIndex++
-		cmd := m.dispatchNextTool()
-		return m, cmd
+		return m.handleToolResult(msg)
 
 	case InterruptMsg:
-		m.streamingContent = ""
-		m.streamingThinkingContent = ""
-		m.waiting = false
-		m.textarea.Focus()
-		m.appendError(msg.Reason)
-		m.saveConversation()
-		m.refreshViewport()
-		return m, nil
+		return m.handleInterrupt(msg)
 
 	case ModelSwitchedMsg:
-		if msg.Err != nil {
-			m.appendError("Failed to switch model: " + msg.Err.Error())
-		} else {
-			m.messages = append(m.messages, ChatEntry{
-				Type:    EntryMessage,
-				Role:    "assistant",
-				Content: "Switched to model: " + msg.Name,
-			})
-		}
-		m.refreshViewport()
-		return m, nil
+		return m.handleModelSwitched(msg)
 
 	case RewindToMessageMsg:
-		// Truncate messages and history to before the selected message
-		m.messages = m.messages[:msg.MessageIndex]
-		m.history = m.history[:msg.HistoryIndex]
-
-		// Populate textarea with the selected message text
-		m.textarea.SetValue(msg.FullText)
-
-		m.saveConversation()
-		m.refreshViewport()
-		return m, nil
+		return m.handleRewind(msg)
 
 	case PermissionDecisionMsg:
-		switch msg.Decision {
-		case PermissionAllow:
-			return m, executeToolInterruptible(m.agent, msg.ToolCall, m.interruptCh)
-
-		case PermissionAlwaysAllow:
-			entry := msg.ToolCall.Function.Name
-			if entry == "bash" {
-				if prefix := permissions.BashCommandPrefix(msg.ToolCall.Function.Arguments); prefix != "" {
-					entry = permissions.BashEntry(prefix)
-				}
-			}
-			if err := m.permissions.Add(entry); err != nil {
-				log.Printf("failed to save permission: %v", err)
-			}
-			return m, executeToolInterruptible(m.agent, msg.ToolCall, m.interruptCh)
-
-		case PermissionDeny:
-			command := msg.ToolCall.Function.Name + ": " + msg.ToolCall.Function.Arguments
-			result := "Tool call denied by user."
-
-			// Append denial to history
-			m.history = append(m.history, llm.Message{
-				Role:       "tool",
-				Content:    result,
-				ToolCallID: msg.ToolCall.ID,
-			})
-
-			// Append denied tool call to UI messages
-			m.messages = append(m.messages, ChatEntry{
-				Type:    EntryToolCall,
-				Command: command,
-				Denied:  true,
-				Diff:    parseDiffFromToolCall(msg.ToolCall.Function.Name, msg.ToolCall.Function.Arguments, "", m.workingDir, true),
-			})
-
-			// Stop the loop — return to user input
-			m.pendingToolCalls = nil
-			m.pendingToolIndex = 0
-			m.waiting = false
-			m.textarea.Focus()
-			m.saveConversation()
-			m.refreshViewport()
-			return m, nil
-		}
+		return m.handlePermissionDecision(msg)
 
 	case ResumeConversationMsg:
-		var messages []ChatEntry
-		if err := json.Unmarshal(msg.Conv.UIMessages, &messages); err != nil {
-			m.appendError("Failed to restore conversation: " + err.Error())
-			m.refreshViewport()
-			return m, nil
-		}
-		var history []llm.Message
-		if err := json.Unmarshal(msg.Conv.AgentHistory, &history); err != nil {
-			m.appendError("Failed to restore conversation history: " + err.Error())
-			m.refreshViewport()
-			return m, nil
-		}
-		m.messages = messages
-		m.history = history
-		m.conv = msg.Conv
-		m.totalTokens = 0
-		m.toolRoundCount = 0
-		m.consecutiveErrors = 0
-		m.pendingToolCalls = nil
-		m.pendingToolIndex = 0
-		m.waiting = false
-		m.textarea.Focus()
-		m.refreshViewport()
-		return m, nil
+		return m.handleResumeConversation(msg)
 
 	case UserInputMsg:
-		text := msg.Text
-
-		m.messages = append(m.messages, ChatEntry{
-			Type:    EntryMessage,
-			Role:    "user",
-			Content: text,
-		})
-
-		// Append user message to history (now on Model, not Agent)
-		m.history = append(m.history, llm.Message{
-			Role:    "user",
-			Content: text,
-		})
-
-		m.textarea.Reset()
-		m.textarea.Blur()
-		m.waiting = true
-		m.toolRoundCount = 0
-		m.consecutiveErrors = 0
-		m.interruptCh = make(chan struct{})
-
-		m.refreshViewport()
-
-		return m, callLLMInterruptible(m.agent, m.history, m.interruptCh)
+		return m.handleUserInput(msg)
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -656,6 +275,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	var cmds []tea.Cmd
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 	cmds = append(cmds, cmd)

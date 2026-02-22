@@ -1,7 +1,10 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -108,4 +111,95 @@ func getDiffForPermission(toolName, argsJSON, workingDir string) string {
 		return ""
 	}
 	return renderDiff(*d)
+}
+
+func parseDiffFromToolCall(toolName, args, result, workingDir string, denied bool) *DiffData {
+	if denied {
+		return parseDiffFromArgs(toolName, args, workingDir)
+	}
+
+	if result == "" {
+		return nil
+	}
+
+	switch toolName {
+	case "write_file":
+		var r struct {
+			FilePath   string `json:"file_path"`
+			NewContent string `json:"new_content"`
+		}
+		if json.Unmarshal([]byte(result), &r) != nil || r.FilePath == "" {
+			return parseDiffFromArgs(toolName, args, workingDir)
+		}
+		return &DiffData{
+			FilePath: r.FilePath,
+			NewText:  r.NewContent,
+		}
+	case "edit_file":
+		var r struct {
+			FilePath  string `json:"file_path"`
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		}
+		if json.Unmarshal([]byte(result), &r) != nil || r.FilePath == "" {
+			return parseDiffFromArgs(toolName, args, workingDir)
+		}
+		startLine := 1
+		path := r.FilePath
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		if data, err := os.ReadFile(path); err == nil {
+			startLine = findStartLine(string(data), r.OldString)
+		}
+		return &DiffData{
+			FilePath:  r.FilePath,
+			OldText:   r.OldString,
+			NewText:   r.NewString,
+			StartLine: startLine,
+		}
+	}
+	return nil
+}
+
+func parseDiffFromArgs(name, argsJSON, workingDir string) *DiffData {
+	switch name {
+	case "edit_file":
+		var args struct {
+			FilePath  string `json:"file_path"`
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		}
+		if json.Unmarshal([]byte(argsJSON), &args) != nil || args.FilePath == "" {
+			return nil
+		}
+		startLine := 1
+		path := args.FilePath
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		if data, err := os.ReadFile(path); err == nil {
+			startLine = findStartLine(string(data), args.OldString)
+		}
+		return &DiffData{
+			FilePath:  args.FilePath,
+			OldText:   args.OldString,
+			NewText:   args.NewString,
+			StartLine: startLine,
+		}
+
+	case "write_file":
+		var args struct {
+			FilePath string `json:"file_path"`
+			Content  string `json:"content"`
+		}
+		if json.Unmarshal([]byte(argsJSON), &args) != nil || args.FilePath == "" {
+			return nil
+		}
+		return &DiffData{
+			FilePath: args.FilePath,
+			NewText:  args.Content,
+		}
+	}
+	return nil
 }
