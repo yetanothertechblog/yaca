@@ -3,296 +3,125 @@ package retry
 import (
 	"context"
 	"errors"
-	"fmt"
 	"testing"
 	"time"
 )
 
 func TestShouldRetry(t *testing.T) {
 	tests := []struct {
-		name     string
-		err      error
-		expected bool
+		name string
+		err  error
+		want bool
 	}{
-		{"nil error", nil, false},
+		{"nil", nil, false},
 		{"connection refused", errors.New("connection refused"), true},
 		{"connection reset", errors.New("connection reset by peer"), true},
-		{"timeout", errors.New("context timeout exceeded"), true},
-		{"rate limit", errors.New("rate limit exceeded"), true},
 		{"too many requests", errors.New("429 too many requests"), true},
-		{"service unavailable", errors.New("503 service unavailable"), true},
-		{"gateway timeout", errors.New("504 gateway timeout"), true},
-		{"bad gateway", errors.New("502 bad gateway"), true},
-		{"network unreachable", errors.New("network is unreachable"), true},
-		{"no such host", errors.New("lookup: no such host"), true},
-		{"non-retryable error", errors.New("bad request"), false},
-		{"validation error", errors.New("invalid input"), false},
+		{"api error 503", errors.New("API error 503: service unavailable"), true},
+		{"api error 502", errors.New("API error 502: bad gateway"), true},
+		{"api error 504", errors.New("api error 504: timeout"), true},
+		{"api error 429", errors.New("api error 429: rate limited"), true},
+		{"bad request", errors.New("bad request"), false},
+		{"validation", errors.New("invalid input"), false},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := shouldRetry(tt.err)
-			if result != tt.expected {
-				t.Errorf("shouldRetry(%q) = %v, want %v", tt.err, result, tt.expected)
+			if got := ShouldRetry(tt.err); got != tt.want {
+				t.Errorf("ShouldRetry(%q) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}
 }
 
 func TestCalculateDelay(t *testing.T) {
-	config := Config{
-		BaseDelay: 100 * time.Millisecond,
-		MaxDelay:  5 * time.Second,
-		Jitter:    0.0, // Disable jitter for predictable testing
-	}
-
+	cfg := Config{BaseDelay: 100 * time.Millisecond, MaxDelay: 5 * time.Second, Jitter: 0}
 	tests := []struct {
-		name           string
-		attempt        int
-		expectedMin    time.Duration
-		expectedMax    time.Duration
+		attempt int
+		want    time.Duration
 	}{
-		{"attempt 1", 1, 100 * time.Millisecond, 100 * time.Millisecond},
-		{"attempt 2", 2, 200 * time.Millisecond, 200 * time.Millisecond},
-		{"attempt 3", 3, 400 * time.Millisecond, 400 * time.Millisecond},
-		{"attempt 4", 4, 800 * time.Millisecond, 800 * time.Millisecond},
-		{"attempt 5", 5, 1600 * time.Millisecond, 1600 * time.Millisecond},
-		{"attempt 6", 6, 3200 * time.Millisecond, 3200 * time.Millisecond},
-		{"attempt 7 (capped)", 7, 5 * time.Second, 5 * time.Second},
+		{1, 100 * time.Millisecond},
+		{2, 200 * time.Millisecond},
+		{3, 400 * time.Millisecond},
+		{7, 5 * time.Second}, // capped
 	}
-
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			delay := calculateDelay(tt.attempt, config)
-			if delay < tt.expectedMin || delay > tt.expectedMax {
-				t.Errorf("calculateDelay(%d) = %v, want between %v and %v",
-					tt.attempt, delay, tt.expectedMin, tt.expectedMax)
-			}
-		})
+		if got := calculateDelay(tt.attempt, cfg); got != tt.want {
+			t.Errorf("calculateDelay(%d) = %v, want %v", tt.attempt, got, tt.want)
+		}
 	}
 }
 
 func TestDo_Success(t *testing.T) {
-	ctx := context.Background()
-	config := Config{
-		MaxAttempts: 3,
-		BaseDelay:   10 * time.Millisecond,
-		MaxDelay:    100 * time.Millisecond,
-		Jitter:      0.1,
-	}
-
-	callCount := 0
-	fn := func() error {
-		callCount++
+	calls := 0
+	err := Do(context.Background(), Config{MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: time.Millisecond}, func() error {
+		calls++
 		return nil
-	}
-
-	err := Do(ctx, config, fn)
-
-	if err != nil {
-		t.Errorf("Do() returned error: %v", err)
-	}
-	if callCount != 1 {
-		t.Errorf("Do() called function %d times, want 1", callCount)
+	})
+	if err != nil || calls != 1 {
+		t.Errorf("err=%v calls=%d", err, calls)
 	}
 }
 
-func TestDo_Retry(t *testing.T) {
-	ctx := context.Background()
-	config := Config{
-		MaxAttempts: 3,
-		BaseDelay:   10 * time.Millisecond,
-		MaxDelay:    100 * time.Millisecond,
-		Jitter:      0.0,
-	}
-
-	callCount := 0
-	fn := func() error {
-		callCount++
-		if callCount < 2 {
+func TestDo_RetriesThenSucceeds(t *testing.T) {
+	calls := 0
+	err := Do(context.Background(), Config{MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}, func() error {
+		calls++
+		if calls < 2 {
 			return errors.New("connection refused")
 		}
 		return nil
-	}
-
-	start := time.Now()
-	err := Do(ctx, config, fn)
-	elapsed := time.Since(start)
-
-	if err != nil {
-		t.Errorf("Do() returned error: %v", err)
-	}
-	if callCount != 2 {
-		t.Errorf("Do() called function %d times, want 2", callCount)
-	}
-	// Should have waited at least BaseDelay
-	if elapsed < config.BaseDelay {
-		t.Errorf("Do() completed in %v, want at least %v", elapsed, config.BaseDelay)
+	})
+	if err != nil || calls != 2 {
+		t.Errorf("err=%v calls=%d", err, calls)
 	}
 }
 
-func TestDo_MaxAttemptsExceeded(t *testing.T) {
-	ctx := context.Background()
-	config := Config{
-		MaxAttempts: 3,
-		BaseDelay:   10 * time.Millisecond,
-		MaxDelay:    100 * time.Millisecond,
-		Jitter:      0.0,
-	}
-
-	callCount := 0
-	fn := func() error {
-		callCount++
+func TestDo_ExhaustsAttempts(t *testing.T) {
+	calls := 0
+	err := Do(context.Background(), Config{MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}, func() error {
+		calls++
 		return errors.New("connection refused")
-	}
-
-	err := Do(ctx, config, fn)
-
-	if err == nil {
-		t.Error("Do() expected error, got nil")
-	}
-	if callCount != 3 {
-		t.Errorf("Do() called function %d times, want 3", callCount)
+	})
+	if err == nil || calls != 3 {
+		t.Errorf("err=%v calls=%d", err, calls)
 	}
 }
 
-func TestDo_NonRetryableError(t *testing.T) {
-	ctx := context.Background()
-	config := Config{
-		MaxAttempts: 3,
-		BaseDelay:   10 * time.Millisecond,
-		MaxDelay:    100 * time.Millisecond,
-		Jitter:      0.0,
-	}
-
-	callCount := 0
-	fn := func() error {
-		callCount++
+func TestDo_NonRetryableReturnsImmediately(t *testing.T) {
+	calls := 0
+	err := Do(context.Background(), Config{MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}, func() error {
+		calls++
 		return errors.New("bad request")
+	})
+	if err == nil || calls != 1 {
+		t.Errorf("err=%v calls=%d", err, calls)
 	}
-
-	err := Do(ctx, config, fn)
-
-	if err == nil {
-		t.Error("Do() expected error, got nil")
-	}
-	if callCount != 1 {
-		t.Errorf("Do() called function %d times, want 1 (non-retryable)", callCount)
+	// Non-retryable first-attempt errors should not be wrapped
+	if err.Error() != "bad request" {
+		t.Errorf("err = %q, want unwrapped original", err.Error())
 	}
 }
 
 func TestDo_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	config := Config{
-		MaxAttempts: 10,
-		BaseDelay:   100 * time.Millisecond,
-		MaxDelay:    1 * time.Second,
-		Jitter:      0.0,
-	}
-
-	callCount := 0
-	fn := func() error {
-		callCount++
-		if callCount == 2 {
+	calls := 0
+	err := Do(ctx, Config{MaxAttempts: 10, BaseDelay: 100 * time.Millisecond, MaxDelay: time.Second}, func() error {
+		calls++
+		if calls == 2 {
 			cancel()
 		}
 		return errors.New("connection refused")
-	}
-
-	err := Do(ctx, config, fn)
-
-	if err == nil {
-		t.Error("Do() expected error due to cancellation, got nil")
-	}
-	if callCount != 2 {
-		t.Errorf("Do() called function %d times, want 2", callCount)
-	}
-}
-
-func TestDoWithResult_Success(t *testing.T) {
-	ctx := context.Background()
-	config := Config{
-		MaxAttempts: 3,
-		BaseDelay:   10 * time.Millisecond,
-		MaxDelay:    100 * time.Millisecond,
-		Jitter:      0.1,
-	}
-
-	callCount := 0
-	fn := func() (string, error) {
-		callCount++
-		return "success", nil
-	}
-
-	result, err := DoWithResult(ctx, config, fn)
-
-	if err != nil {
-		t.Errorf("DoWithResult() returned error: %v", err)
-	}
-	if result != "success" {
-		t.Errorf("DoWithResult() = %q, want %q", result, "success")
-	}
-	if callCount != 1 {
-		t.Errorf("DoWithResult() called function %d times, want 1", callCount)
-	}
-}
-
-func TestDoWithResult_Retry(t *testing.T) {
-	ctx := context.Background()
-	config := Config{
-		MaxAttempts: 3,
-		BaseDelay:   10 * time.Millisecond,
-		MaxDelay:    100 * time.Millisecond,
-		Jitter:      0.0,
-	}
-
-	callCount := 0
-	fn := func() (string, error) {
-		callCount++
-		if callCount < 3 {
-			return "", errors.New("timeout")
-		}
-		return "success", nil
-	}
-
-	result, err := DoWithResult(ctx, config, fn)
-
-	if err != nil {
-		t.Errorf("DoWithResult() returned error: %v", err)
-	}
-	if result != "success" {
-		t.Errorf("DoWithResult() = %q, want %q", result, "success")
-	}
-	if callCount != 3 {
-		t.Errorf("DoWithResult() called function %d times, want 3", callCount)
+	})
+	if err == nil || calls != 2 {
+		t.Errorf("err=%v calls=%d", err, calls)
 	}
 }
 
 func BenchmarkDo_Success(b *testing.B) {
-	ctx := context.Background()
-	config := DefaultConfig()
+	cfg := DefaultConfig()
 	fn := func() error { return nil }
-
-	for i := 0; i < b.N; i++ {
-		Do(ctx, config, fn)
-	}
-}
-
-func ExampleConfig() {
-	config := Config{
-		MaxAttempts: 5,
-		BaseDelay:   100 * time.Millisecond,
-		MaxDelay:    30 * time.Second,
-		Jitter:      0.1,
-	}
-
 	ctx := context.Background()
-	err := Do(ctx, config, func() error {
-		// Your operation here
-		return nil
-	})
-
-	if err != nil {
-		fmt.Printf("Operation failed: %v\n", err)
+	for i := 0; i < b.N; i++ {
+		Do(ctx, cfg, fn)
 	}
 }

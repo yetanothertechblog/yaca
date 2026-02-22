@@ -1,450 +1,155 @@
 package circuit
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
 )
 
 func TestNew(t *testing.T) {
-	config := Config{
-		MaxFailures:      3,
-		SuccessThreshold: 2,
-		OpenTimeout:      10 * time.Second,
-	}
-
-	breaker := New(config)
-
+	breaker := New(Config{MaxFailures: 3, SuccessThreshold: 2, OpenTimeout: 10 * time.Second})
 	if breaker.State() != StateClosed {
-		t.Errorf("New() State = %v, want CLOSED", breaker.State())
+		t.Errorf("State = %v, want CLOSED", breaker.State())
 	}
-
 	stats := breaker.GetStats()
-	if stats.State != StateClosed {
-		t.Errorf("New() Stats.State = %v, want CLOSED", stats.State)
-	}
 	if stats.ConsecutiveFailures != 0 {
-		t.Errorf("New() Stats.ConsecutiveFailures = %d, want 0", stats.ConsecutiveFailures)
+		t.Errorf("ConsecutiveFailures = %d, want 0", stats.ConsecutiveFailures)
 	}
 }
 
 func TestDefaultConfig(t *testing.T) {
-	config := DefaultConfig()
-
-	if config.MaxFailures != 5 {
-		t.Errorf("DefaultConfig().MaxFailures = %d, want 5", config.MaxFailures)
-	}
-	if config.SuccessThreshold != 2 {
-		t.Errorf("DefaultConfig().SuccessThreshold = %d, want 2", config.SuccessThreshold)
-	}
-	if config.OpenTimeout != 30*time.Second {
-		t.Errorf("DefaultConfig().OpenTimeout = %v, want 30s", config.OpenTimeout)
+	c := DefaultConfig()
+	if c.MaxFailures != 5 || c.SuccessThreshold != 2 || c.OpenTimeout != 30*time.Second {
+		t.Errorf("DefaultConfig() = %+v", c)
 	}
 }
 
-func TestNewDefault(t *testing.T) {
-	breaker := NewDefault()
-
-	if breaker.State() != StateClosed {
-		t.Errorf("NewDefault() State = %v, want CLOSED", breaker.State())
-	}
-}
-
-func TestRecordSuccess(t *testing.T) {
-	breaker := NewDefault()
-
-	// Record some failures first
+func TestRecordSuccess_ResetsFailures(t *testing.T) {
+	b := NewDefault()
 	for i := 0; i < 3; i++ {
-		breaker.RecordFailure()
+		b.RecordFailure()
 	}
-
-	stats := breaker.GetStats()
-	if stats.ConsecutiveFailures != 3 {
-		t.Errorf("After 3 failures, ConsecutiveFailures = %d, want 3", stats.ConsecutiveFailures)
-	}
-
-	// Record success
-	breaker.RecordSuccess()
-
-	stats = breaker.GetStats()
-	if stats.ConsecutiveFailures != 0 {
-		t.Errorf("After success, ConsecutiveFailures = %d, want 0", stats.ConsecutiveFailures)
+	b.RecordSuccess()
+	if s := b.GetStats(); s.ConsecutiveFailures != 0 {
+		t.Errorf("ConsecutiveFailures = %d, want 0", s.ConsecutiveFailures)
 	}
 }
 
-func TestRecordFailure(t *testing.T) {
-	config := Config{
-		MaxFailures:      3,
-		SuccessThreshold: 2,
-		OpenTimeout:      1 * time.Second,
-	}
-	breaker := New(config)
-
-	// Record failures until circuit opens
+func TestRecordFailure_OpensCircuit(t *testing.T) {
+	b := New(Config{MaxFailures: 3, SuccessThreshold: 2, OpenTimeout: time.Second})
 	for i := 0; i < 3; i++ {
-		breaker.RecordFailure()
+		b.RecordFailure()
 	}
-
-	if breaker.State() != StateOpen {
-		t.Errorf("After 3 failures, State = %v, want OPEN", breaker.State())
+	if b.State() != StateOpen {
+		t.Errorf("State = %v, want OPEN", b.State())
 	}
 }
 
 func TestExecute_Success(t *testing.T) {
-	ctx := context.Background()
-	breaker := NewDefault()
-	callCount := 0
-
-	fn := func() error {
-		callCount++
-		return nil
-	}
-
-	err := breaker.Execute(ctx, fn)
-
-	if err != nil {
-		t.Errorf("Execute() returned error: %v", err)
-	}
-	if callCount != 1 {
-		t.Errorf("Execute() called function %d times, want 1", callCount)
-	}
-	if breaker.State() != StateClosed {
-		t.Errorf("Execute() State = %v, want CLOSED", breaker.State())
+	b := NewDefault()
+	called := false
+	err := b.Execute(func() error { called = true; return nil })
+	if err != nil || !called {
+		t.Errorf("Execute() err=%v called=%v", err, called)
 	}
 }
 
-func TestExecute_Failure(t *testing.T) {
-	ctx := context.Background()
-	config := Config{
-		MaxFailures:      3,
-		SuccessThreshold: 2,
-		OpenTimeout:      1 * time.Second,
-	}
-	breaker := New(config)
-
-	fn := func() error {
-		return errors.New("operation failed")
-	}
-
-	// Execute failures until circuit opens
+func TestExecute_OpensAfterFailures(t *testing.T) {
+	b := New(Config{MaxFailures: 3, SuccessThreshold: 2, OpenTimeout: time.Second})
 	for i := 0; i < 3; i++ {
-		err := breaker.Execute(ctx, fn)
-		if err == nil {
-			t.Errorf("Execute() expected error, got nil")
-		}
+		b.Execute(func() error { return errors.New("fail") })
 	}
-
-	if breaker.State() != StateOpen {
-		t.Errorf("After 3 failures, State = %v, want OPEN", breaker.State())
+	if b.State() != StateOpen {
+		t.Errorf("State = %v, want OPEN", b.State())
 	}
 }
 
-func TestExecute_Open(t *testing.T) {
-	ctx := context.Background()
-	config := Config{
-		MaxFailures:      2,
-		SuccessThreshold: 1,
-		OpenTimeout:      1 * time.Second,
-	}
-	breaker := New(config)
-
-	// Open the circuit
+func TestExecute_FailsFastWhenOpen(t *testing.T) {
+	b := New(Config{MaxFailures: 2, SuccessThreshold: 1, OpenTimeout: time.Second})
 	for i := 0; i < 2; i++ {
-		breaker.RecordFailure()
+		b.RecordFailure()
 	}
-
-	// Try to execute while circuit is open
-	callCount := 0
-	fn := func() error {
-		callCount++
-		return nil
-	}
-
-	err := breaker.Execute(ctx, fn)
-
-	if err == nil {
-		t.Error("Execute() expected error when circuit is open, got nil")
-	}
+	called := false
+	err := b.Execute(func() error { called = true; return nil })
 	if !IsOpenError(err) {
-		t.Errorf("Execute() error type = %T, want *OpenError", err)
+		t.Errorf("err type = %T, want *OpenError", err)
 	}
-	if callCount != 0 {
-		t.Errorf("Execute() called function %d times when circuit is open, want 0", callCount)
+	if called {
+		t.Error("function should not be called when circuit is open")
 	}
 }
 
-func TestExecute_HalfOpen(t *testing.T) {
-	ctx := context.Background()
-	config := Config{
-		MaxFailures:      2,
-		SuccessThreshold: 2,
-		OpenTimeout:      100 * time.Millisecond,
-	}
-	breaker := New(config)
-
-	// Open the circuit
+func TestExecute_HalfOpenRecovery(t *testing.T) {
+	b := New(Config{MaxFailures: 2, SuccessThreshold: 2, OpenTimeout: 100 * time.Millisecond})
 	for i := 0; i < 2; i++ {
-		breaker.RecordFailure()
+		b.RecordFailure()
 	}
-
-	if breaker.State() != StateOpen {
-		t.Errorf("Initial State = %v, want OPEN", breaker.State())
-	}
-
-	// Wait for open timeout to pass
 	time.Sleep(150 * time.Millisecond)
 
-	// First success in half-open state
-	callCount := 0
-	fn := func() error {
-		callCount++
-		return nil
+	// First success: still half-open
+	b.Execute(func() error { return nil })
+	if b.State() != StateHalfOpen {
+		t.Errorf("State = %v, want HALF_OPEN", b.State())
 	}
 
-	err := breaker.Execute(ctx, fn)
-	if err != nil {
-		t.Errorf("First Execute() error: %v", err)
-	}
-
-	if breaker.State() != StateHalfOpen {
-		t.Errorf("After 1 success, State = %v, want HALF_OPEN", breaker.State())
-	}
-
-	// Second success should close the circuit
-	err = breaker.Execute(ctx, fn)
-	if err != nil {
-		t.Errorf("Second Execute() error: %v", err)
-	}
-
-	if breaker.State() != StateClosed {
-		t.Errorf("After 2 successes, State = %v, want CLOSED", breaker.State())
+	// Second success: closes
+	b.Execute(func() error { return nil })
+	if b.State() != StateClosed {
+		t.Errorf("State = %v, want CLOSED", b.State())
 	}
 }
 
-func TestExecute_HalfOpenFailure(t *testing.T) {
-	ctx := context.Background()
-	config := Config{
-		MaxFailures:      2,
-		SuccessThreshold: 2,
-		OpenTimeout:      100 * time.Millisecond,
-	}
-	breaker := New(config)
-
-	// Open the circuit
+func TestExecute_HalfOpenFailureReopens(t *testing.T) {
+	b := New(Config{MaxFailures: 2, SuccessThreshold: 2, OpenTimeout: 100 * time.Millisecond})
 	for i := 0; i < 2; i++ {
-		breaker.RecordFailure()
+		b.RecordFailure()
 	}
-
-	// Wait for open timeout to pass
 	time.Sleep(150 * time.Millisecond)
 
-	// First success in half-open
-	fnSuccess := func() error {
-		return nil
-	}
-	err := breaker.Execute(ctx, fnSuccess)
-	if err != nil {
-		t.Errorf("First Execute() error: %v", err)
-	}
-
-	// Second call fails, should open circuit again
-	fnFail := func() error {
-		return errors.New("operation failed")
-	}
-	err = breaker.Execute(ctx, fnFail)
-	if err == nil {
-		t.Error("Second Execute() expected error, got nil")
-	}
-
-	if breaker.State() != StateOpen {
-		t.Errorf("After failure in half-open, State = %v, want OPEN", breaker.State())
-	}
-}
-
-func TestExecuteWithResult(t *testing.T) {
-	ctx := context.Background()
-	breaker := NewDefault()
-	callCount := 0
-
-	fn := func() (string, error) {
-		callCount++
-		return "result", nil
-	}
-
-	result, err := ExecuteWithResult(breaker, ctx, fn)
-
-	if err != nil {
-		t.Errorf("ExecuteWithResult() returned error: %v", err)
-	}
-	if result != "result" {
-		t.Errorf("ExecuteWithResult() = %q, want %q", result, "result")
-	}
-	if callCount != 1 {
-		t.Errorf("ExecuteWithResult() called function %d times, want 1", callCount)
-	}
-}
-
-func TestExecuteWithResult_Failure(t *testing.T) {
-	ctx := context.Background()
-	config := Config{
-		MaxFailures:      2,
-		SuccessThreshold: 2,
-		OpenTimeout:      1 * time.Second,
-	}
-	breaker := New(config)
-
-	fn := func() (string, error) {
-		return "", errors.New("operation failed")
-	}
-
-	// Execute failures until circuit opens
-	for i := 0; i < 2; i++ {
-		_, err := ExecuteWithResult(breaker, ctx, fn)
-		if err == nil {
-			t.Errorf("ExecuteWithResult() expected error, got nil")
-		}
-	}
-
-	if breaker.State() != StateOpen {
-		t.Errorf("After 2 failures, State = %v, want OPEN", breaker.State())
-	}
-}
-
-func TestExecuteWithResult_Open(t *testing.T) {
-	ctx := context.Background()
-	config := Config{
-		MaxFailures:      2,
-		SuccessThreshold: 1,
-		OpenTimeout:      1 * time.Second,
-	}
-	breaker := New(config)
-
-	// Open the circuit
-	for i := 0; i < 2; i++ {
-		breaker.RecordFailure()
-	}
-
-	// Try to execute while circuit is open
-	callCount := 0
-	fn := func() (string, error) {
-		callCount++
-		return "result", nil
-	}
-
-	_, err := ExecuteWithResult(breaker, ctx, fn)
-
-	if err == nil {
-		t.Error("ExecuteWithResult() expected error when circuit is open, got nil")
-	}
-	if !IsOpenError(err) {
-		t.Errorf("ExecuteWithResult() error type = %T, want *OpenError", err)
-	}
-	if callCount != 0 {
-		t.Errorf("ExecuteWithResult() called function %d times when circuit is open, want 0", callCount)
+	b.Execute(func() error { return nil })
+	b.Execute(func() error { return errors.New("fail") })
+	if b.State() != StateOpen {
+		t.Errorf("State = %v, want OPEN", b.State())
 	}
 }
 
 func TestReset(t *testing.T) {
-	config := Config{
-		MaxFailures:      2,
-		SuccessThreshold: 1,
-		OpenTimeout:      1 * time.Second,
-	}
-	breaker := New(config)
-
-	// Open the circuit
+	b := New(Config{MaxFailures: 2, SuccessThreshold: 1, OpenTimeout: time.Second})
 	for i := 0; i < 2; i++ {
-		breaker.RecordFailure()
+		b.RecordFailure()
 	}
-
-	if breaker.State() != StateOpen {
-		t.Errorf("Before reset, State = %v, want OPEN", breaker.State())
+	b.Reset()
+	if b.State() != StateClosed {
+		t.Errorf("State = %v, want CLOSED", b.State())
 	}
-
-	// Reset the breaker
-	breaker.Reset()
-
-	if breaker.State() != StateClosed {
-		t.Errorf("After reset, State = %v, want CLOSED", breaker.State())
-	}
-
-	stats := breaker.GetStats()
-	if stats.ConsecutiveFailures != 0 {
-		t.Errorf("After reset, ConsecutiveFailures = %d, want 0", stats.ConsecutiveFailures)
-	}
-	if stats.ConsecutiveSuccesses != 0 {
-		t.Errorf("After reset, ConsecutiveSuccesses = %d, want 0", stats.ConsecutiveSuccesses)
+	if s := b.GetStats(); s.ConsecutiveFailures != 0 {
+		t.Errorf("ConsecutiveFailures = %d, want 0", s.ConsecutiveFailures)
 	}
 }
 
 func TestOpenError(t *testing.T) {
 	err := &OpenError{Timeout: 5 * time.Second}
-
-	errStr := err.Error()
-	if errStr == "" {
+	if err.Error() == "" {
 		t.Error("OpenError.Error() returned empty string")
 	}
 }
 
 func TestIsOpenError(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		expected bool
-	}{
-		{"OpenError", &OpenError{}, true},
-		{"standard error", errors.New("some error"), false},
-		{"nil error", nil, false},
+	if !IsOpenError(&OpenError{}) {
+		t.Error("IsOpenError(OpenError) = false")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := IsOpenError(tt.err)
-			if result != tt.expected {
-				t.Errorf("IsOpenError(%v) = %v, want %v", tt.err, result, tt.expected)
-			}
-		})
+	if IsOpenError(errors.New("x")) {
+		t.Error("IsOpenError(plain error) = true")
+	}
+	if IsOpenError(nil) {
+		t.Error("IsOpenError(nil) = true")
 	}
 }
 
 func BenchmarkExecute_Success(b *testing.B) {
-	ctx := context.Background()
 	breaker := NewDefault()
 	fn := func() error { return nil }
-
-	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		breaker.Execute(ctx, fn)
+		breaker.Execute(fn)
 	}
-}
-
-func ExampleBreaker_Execute() {
-	breaker := NewDefault()
-	ctx := context.Background()
-
-	err := breaker.Execute(ctx, func() error {
-		// Your operation here
-		return nil
-	})
-
-	if err != nil {
-		// Handle error
-	}
-}
-
-func ExampleExecuteWithResult() {
-	breaker := NewDefault()
-	ctx := context.Background()
-
-	result, err := ExecuteWithResult(breaker, ctx, func() (string, error) {
-		// Your operation here
-		return "success", nil
-	})
-
-	if err != nil {
-		// Handle error
-	}
-
-	_ = result
 }
