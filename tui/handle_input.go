@@ -63,7 +63,7 @@ func (m *Model) handleModelSwitched(msg ModelSwitchedMsg) (tea.Model, tea.Cmd) {
 	if msg.Err != nil {
 		m.appendError("Failed to switch model: " + msg.Err.Error())
 	} else {
-		m.messages = append(m.messages, ChatEntry{
+		m.appendAssistantEntry(ChatEntry{
 			Type:    EntryMessage,
 			Role:    "assistant",
 			Content: "Switched to model: " + msg.Name,

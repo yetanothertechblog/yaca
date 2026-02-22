@@ -140,14 +140,17 @@ func renderMessageEntry(entry ChatEntry, md *MarkdownRenderer) string {
 		if strings.TrimSpace(entry.ReasoningContent) != "" {
 			parts = append(parts, renderThinkingBlock(entry.ReasoningContent))
 		}
-		parts = append(parts, renderAssistantMessage(entry.Content, md))
+		parts = append(parts, renderAssistantMessage(entry.Content, entry.RenderedContent, md))
 		return strings.Join(parts, "\n\n")
 	default:
 		return fmt.Sprintf("%s: %s", entry.Role, entry.Content)
 	}
 }
 
-func renderAssistantMessage(content string, md *MarkdownRenderer) string {
+func renderAssistantMessage(content, renderedCache string, md *MarkdownRenderer) string {
+	if renderedCache != "" {
+		return renderedCache
+	}
 	if md != nil {
 		if r, err := md.Render(content); err == nil {
 			return r
