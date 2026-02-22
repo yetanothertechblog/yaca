@@ -14,20 +14,19 @@ func TestShouldRetry(t *testing.T) {
 		want bool
 	}{
 		{"nil", nil, false},
-		{"connection refused", errors.New("connection refused"), true},
-		{"connection reset", errors.New("connection reset by peer"), true},
-		{"too many requests", errors.New("429 too many requests"), true},
-		{"api error 503", errors.New("API error 503: service unavailable"), true},
-		{"api error 502", errors.New("API error 502: bad gateway"), true},
-		{"api error 504", errors.New("api error 504: timeout"), true},
-		{"api error 429", errors.New("api error 429: rate limited"), true},
-		{"bad request", errors.New("bad request"), false},
-		{"validation", errors.New("invalid input"), false},
+		{"429", &APIError{StatusCode: 429}, true},
+		{"502", &APIError{StatusCode: 502}, true},
+		{"503", &APIError{StatusCode: 503}, true},
+		{"504", &APIError{StatusCode: 504}, true},
+		{"400", &APIError{StatusCode: 400}, false},
+		{"401", &APIError{StatusCode: 401}, false},
+		{"404", &APIError{StatusCode: 404}, false},
+		{"plain error", errors.New("something failed"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := ShouldRetry(tt.err); got != tt.want {
-				t.Errorf("ShouldRetry(%q) = %v, want %v", tt.err, got, tt.want)
+				t.Errorf("ShouldRetry(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}
@@ -67,7 +66,7 @@ func TestDo_RetriesThenSucceeds(t *testing.T) {
 	err := Do(context.Background(), Config{MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}, func() error {
 		calls++
 		if calls < 2 {
-			return errors.New("connection refused")
+			return &APIError{StatusCode: 503}
 		}
 		return nil
 	})
@@ -80,7 +79,7 @@ func TestDo_ExhaustsAttempts(t *testing.T) {
 	calls := 0
 	err := Do(context.Background(), Config{MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}, func() error {
 		calls++
-		return errors.New("connection refused")
+		return &APIError{StatusCode: 429}
 	})
 	if err == nil || calls != 3 {
 		t.Errorf("err=%v calls=%d", err, calls)
@@ -91,13 +90,13 @@ func TestDo_NonRetryableReturnsImmediately(t *testing.T) {
 	calls := 0
 	err := Do(context.Background(), Config{MaxAttempts: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}, func() error {
 		calls++
-		return errors.New("bad request")
+		return &APIError{StatusCode: 400, Body: "bad request"}
 	})
 	if err == nil || calls != 1 {
 		t.Errorf("err=%v calls=%d", err, calls)
 	}
 	// Non-retryable first-attempt errors should not be wrapped
-	if err.Error() != "bad request" {
+	if err.Error() != "API error 400: bad request" {
 		t.Errorf("err = %q, want unwrapped original", err.Error())
 	}
 }
@@ -110,10 +109,17 @@ func TestDo_ContextCancellation(t *testing.T) {
 		if calls == 2 {
 			cancel()
 		}
-		return errors.New("connection refused")
+		return &APIError{StatusCode: 502}
 	})
 	if err == nil || calls != 2 {
 		t.Errorf("err=%v calls=%d", err, calls)
+	}
+}
+
+func TestAPIError_Error(t *testing.T) {
+	err := &APIError{StatusCode: 503, Body: "service unavailable"}
+	if err.Error() != "API error 503: service unavailable" {
+		t.Errorf("Error() = %q", err.Error())
 	}
 }
 

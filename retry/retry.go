@@ -2,11 +2,11 @@ package retry
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"math/rand"
 	"net"
-	"strings"
 	"time"
 )
 
@@ -26,38 +26,36 @@ func DefaultConfig() Config {
 	}
 }
 
+// APIError represents an HTTP API error with a status code.
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("API error %d: %s", e.StatusCode, e.Body)
+}
+
 // ShouldRetry returns true if the error is transient and worth retrying.
 func ShouldRetry(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	// Check for net.Error (timeout, temporary)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case 429, 502, 503, 504:
+			return true
+		}
+		return false
+	}
+
 	if netErr, ok := err.(net.Error); ok {
 		return netErr.Timeout()
 	}
 
-	// Fall back to string matching for HTTP-level errors (e.g. "API error 429: ...")
-	errStr := strings.ToLower(err.Error())
-	for _, pattern := range retryablePatterns {
-		if strings.Contains(errStr, pattern) {
-			return true
-		}
-	}
 	return false
-}
-
-var retryablePatterns = []string{
-	"connection refused",
-	"connection reset",
-	"too many requests",
-	"service unavailable",
-	"gateway timeout",
-	"bad gateway",
-	"api error 429",
-	"api error 502",
-	"api error 503",
-	"api error 504",
 }
 
 func calculateDelay(attempt int, cfg Config) time.Duration {

@@ -99,7 +99,7 @@ func doCallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 	if resp.StatusCode != http.StatusOK {
 		var errBody bytes.Buffer
 		errBody.ReadFrom(resp.Body)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, errBody.String())
+		return nil, &retry.APIError{StatusCode: resp.StatusCode, Body: errBody.String()}
 	}
 
 	var chatResp ChatResponse
@@ -163,7 +163,7 @@ func doCallLLMStream(messages []Message, tools []Tool, onContent func(string, bo
 	if resp.StatusCode != http.StatusOK {
 		var errBody bytes.Buffer
 		errBody.ReadFrom(resp.Body)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, errBody.String())
+		return nil, &retry.APIError{StatusCode: resp.StatusCode, Body: errBody.String()}
 	}
 
 	full := &Delta{}
