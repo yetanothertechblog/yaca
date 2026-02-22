@@ -28,20 +28,24 @@ Only `agent`, `conversation`, and `tui` have tests. The LSP layer, tool executio
 
 ---
 
-### 2. Hardcoded Single API Provider
+### 2. ✅ Hardcoded Single API Provider (COMPLETED)
 
-```go
-// config/models.go
-const zaiEndpoint = "https://api.z.ai/api/paas/v4/chat/completions"
-```
+**Status:** Multi-provider support implemented
 
-The entire codebase is hardcoded to a single proprietary API endpoint. No OpenAI, Anthropic, or local model support. This severely limits adoption.
+**Implementation:**
+- Removed hardcoded `zaiEndpoint` constant
+- Each model now has its own `APIURL` field
+- Added OpenAI-compatible models: gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo, codex-5.3
+- Supports different API keys per provider (Z_API, OPENAI_API)
+- Maintains backward compatibility with existing Z.AI models
 
-**Recommendation:**
-- Create a `Provider` interface with multiple implementations
-- Support configuration-based provider registration
-- Add OpenAI, Anthropic, and Ollama providers
-- Allow custom API endpoints via configuration
+~~The entire codebase is hardcoded to a single proprietary API endpoint. No OpenAI, Anthropic, or local model support. This severely limits adoption.~~
+
+~~**Recommendation:~~
+~~- Create a `Provider` interface with multiple implementations~~
+~~- Support configuration-based provider registration~~
+~~- Add OpenAI, Anthropic, and Ollama providers~~
+~~- Allow custom API endpoints via configuration~~
 
 ---
 
@@ -88,20 +92,18 @@ No retries, no exponential backoff, no rate limiting, no circuit breaker. Networ
 
 ---
 
-### 5. Security: API Keys Stored in Plaintext
+### 5. ✅ Security: API Keys Stored in Plaintext (COMPLETED)
 
-```go
-// settings/settings.go:77
-return os.WriteFile(filepath.Join(s.dir, settingsFile), data, 0o644)
-```
+**Status:** Fixed in PR #10 - [secure-api-key-storage](https://github.com/yetanothertechblog/go-tui-agent/pull/10)
 
-API keys are stored in plaintext JSON at `~/.yaca/settings.json` with world-readable permissions (0644). No encryption, no keychain integration.
+**Implementation:**
+- Created `settings/keystore.go` with OS keychain integration using `go-keyring`
+- Supports macOS Keychain, Windows Credential Manager, Linux Secret Service
+- Priority chain: Environment variables (`YACA_<KEYNAME>_API_KEY`) → OS keychain → In-memory cache
+- Restricted file permissions from `0644` to `0600`
+- Added `Get()`, `Set()`, `Delete()`, `IsKeyringAvailable()` methods
 
-**Recommendation:**
-- Integrate with OS keychain (Keychain on macOS, Credential Manager on Windows, Secret Service on Linux)
-- At minimum, restrict file permissions to 0600
-- Consider environment variable support for CI/CD scenarios
-- Add key rotation support
+~~API keys are stored in plaintext JSON at `~/.yaca/settings.json` with world-readable permissions (0644). No encryption, no keychain integration.~~
 
 ---
 
@@ -459,8 +461,8 @@ When editing multiple files, a failure halfway through leaves the codebase in an
 
 1. **Add tests** for `agent/tools`, `lsp`, `permissions`, `llm` packages
 2. **Implement context window management** with automatic truncation
-3. **Add multi-provider support** (OpenAI, Anthropic, Ollama)
-4. **Secure API key storage** using OS keychain
+3. ✅ **Add multi-provider support** (OpenAI compatible models)
+4. ✅ **Secure API key storage** using OS keychain (PR #10)
 5. **Add request retry** with exponential backoff
 
 ---
