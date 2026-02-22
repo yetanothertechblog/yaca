@@ -3,18 +3,24 @@ package llm
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
+
+	"go-tui/circuit"
+	"go-tui/config"
+	"go-tui/retry"
 )
 
 var (
-	mu        sync.RWMutex
-	activeURL string
-	activeKey string
+	mu          sync.RWMutex
+	activeURL   string
+	activeKey   string
 	activeModel string
+	breaker     = circuit.NewDefault()
 )
 
 // Configure sets the active model configuration used by CallLLM and CallLLMStream.
@@ -32,7 +38,34 @@ func getConfig() (string, string, string) {
 	return activeURL, activeKey, activeModel
 }
 
+func GetCircuitBreakerStats() circuit.Stats {
+	return breaker.GetStats()
+}
+
+func ResetCircuitBreaker() {
+	breaker.Reset()
+}
+
+var retryCfg = retry.Config{
+	MaxAttempts: config.MaxRetryAttempts,
+	BaseDelay:   config.RetryBaseDelay,
+	MaxDelay:    config.RetryMaxDelay,
+	Jitter:      config.RetryJitter,
+}
+
 func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
+	var result *LLMResult
+	err := breaker.Execute(func() error {
+		return retry.Do(context.Background(), retryCfg, func() error {
+			var err error
+			result, err = doCallLLM(messages, tools)
+			return err
+		})
+	})
+	return result, err
+}
+
+func doCallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 	url, key, model := getConfig()
 	if url == "" || key == "" || model == "" {
 		return nil, fmt.Errorf("LLM not configured: call Configure() first")
@@ -66,7 +99,7 @@ func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 	if resp.StatusCode != http.StatusOK {
 		var errBody bytes.Buffer
 		errBody.ReadFrom(resp.Body)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, errBody.String())
+		return nil, &retry.APIError{StatusCode: resp.StatusCode, Body: errBody.String()}
 	}
 
 	var chatResp ChatResponse
@@ -84,7 +117,19 @@ func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 	}, nil
 }
 
+// CallLLMStream uses the circuit breaker but does NOT retry, since partial
+// content may have already been streamed to the caller.
 func CallLLMStream(messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
+	var result *LLMResult
+	err := breaker.Execute(func() error {
+		var err error
+		result, err = doCallLLMStream(messages, tools, onContent)
+		return err
+	})
+	return result, err
+}
+
+func doCallLLMStream(messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
 	url, key, model := getConfig()
 	if url == "" || key == "" || model == "" {
 		return nil, fmt.Errorf("LLM not configured: call Configure() first")
@@ -118,7 +163,7 @@ func CallLLMStream(messages []Message, tools []Tool, onContent func(string, bool
 	if resp.StatusCode != http.StatusOK {
 		var errBody bytes.Buffer
 		errBody.ReadFrom(resp.Body)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, errBody.String())
+		return nil, &retry.APIError{StatusCode: resp.StatusCode, Body: errBody.String()}
 	}
 
 	full := &Delta{}

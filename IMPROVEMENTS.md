@@ -71,9 +71,22 @@ The LLM will silently fail or produce degraded output when context exceeds limit
 
 ---
 
-### 4. No Retry Logic or Resilience
+### 4. ✅ No Retry Logic or Resilience (COMPLETED)
 
-```go
+**Status:** Implemented with exponential backoff and circuit breaker
+
+**Implementation:**
+- Created `retry/` package with configurable exponential backoff and jitter
+- Created `circuit/` package with full circuit breaker pattern (CLOSED, OPEN, HALF_OPEN states)
+- Added configuration constants in `config/constants.go` for retry and circuit breaker settings
+- Integrated both patterns into `llm/client.go` for `CallLLM` and `CallLLMStream`
+- Smart retry detection: only retries on network/transient errors (connection refused, timeout, rate limits, etc.)
+- Automatic circuit opening after consecutive failures with configurable threshold
+- Automatic recovery through half-open state that probes service health
+- Added helper functions `GetCircuitBreakerStats()` and `ResetCircuitBreaker()` for monitoring and manual control
+- Comprehensive test coverage for both packages
+
+~~```go
 // llm/client.go:60-69
 resp, err := http.DefaultClient.Do(httpReq)
 if err != nil {
@@ -88,7 +101,7 @@ No retries, no exponential backoff, no rate limiting, no circuit breaker. Networ
 - Add configurable retry limits
 - Implement rate limiting for API compliance
 - Add circuit breaker pattern for fail-fast behavior
-- Use context for request cancellation
+- Use context for request cancellation~~
 
 ---
 
@@ -450,7 +463,7 @@ When editing multiple files, a failure halfway through leaves the codebase in an
 
 | Priority | Category | Count |
 |----------|----------|-------|
-| 🔴 Critical | Testing, Security, Architecture | 5 |
+| 🔴 Critical | Testing, Security, Architecture | 4 |
 | 🟠 Major | UX, Reliability, Safety | 5 |
 | 🟡 Moderate | Features, Configuration | 7 |
 | 🟢 Minor | Polish, Accessibility | 7 |
@@ -463,7 +476,7 @@ When editing multiple files, a failure halfway through leaves the codebase in an
 2. **Implement context window management** with automatic truncation
 3. ✅ **Add multi-provider support** (OpenAI compatible models)
 4. ✅ **Secure API key storage** using OS keychain (PR #10)
-5. **Add request retry** with exponential backoff
+5. ✅ **Add request retry** with exponential backoff and circuit breaker
 
 ---
 
