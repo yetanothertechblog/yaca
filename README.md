@@ -30,7 +30,7 @@ To download the release binary and run, follow the instructions in the release s
 
 ## Demo
 
-Heres a demo using GLM-4.5 Air
+Heres a demo using GLM-4.7
 
 ![Demo](https://github.com/yetanothertechblog/yaca/blob/9359ddb22da65d4d16042e738d9c423898e2d846/yaca-demo.gif)  
 
