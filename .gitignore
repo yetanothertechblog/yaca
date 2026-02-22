@@ -4,3 +4,4 @@ go-tui
 log/
 tmp/
 .yaca/permissions.json
+docs/

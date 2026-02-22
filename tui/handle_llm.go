@@ -44,7 +44,7 @@ func (m *Model) handleLLMResponse(msg LLMResponseMsg) (tea.Model, tea.Cmd) {
 			Content: msg.Content,
 		})
 		if strings.TrimSpace(msg.Content) != "" || msg.ReasoningContent != "" {
-			m.messages = append(m.messages, ChatEntry{
+			m.appendAssistantEntry(ChatEntry{
 				Type:             EntryMessage,
 				Role:             "assistant",
 				Content:          msg.Content,
@@ -65,7 +65,7 @@ func (m *Model) handleLLMResponse(msg LLMResponseMsg) (tea.Model, tea.Cmd) {
 
 	// If there's meaningful content alongside tool calls, show it
 	if strings.TrimSpace(msg.Content) != "" || msg.ReasoningContent != "" {
-		m.messages = append(m.messages, ChatEntry{
+		m.appendAssistantEntry(ChatEntry{
 			Type:             EntryMessage,
 			Role:             "assistant",
 			Content:          msg.Content,
@@ -97,13 +97,12 @@ func (m *Model) handleCompactResult(msg CompactResultMsg) (tea.Model, tea.Cmd) {
 			Content: "[Conversation summary]\n" + msg.Summary,
 		},
 	}
-	m.messages = []ChatEntry{
-		{
-			Type:    EntryMessage,
-			Role:    "assistant",
-			Content: "Conversation compacted:\n\n" + msg.Summary,
-		},
-	}
+	m.messages = []ChatEntry{}
+	m.appendAssistantEntry(ChatEntry{
+		Type:    EntryMessage,
+		Role:    "assistant",
+		Content: "Conversation compacted:\n\n" + msg.Summary,
+	})
 	if msg.Usage != nil {
 		m.totalTokens = msg.Usage.TotalTokens
 	}

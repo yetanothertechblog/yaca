@@ -42,6 +42,7 @@ type ChatEntry struct {
 	Role             string    `json:"role,omitempty"`
 	Content          string    `json:"content,omitempty"`
 	ReasoningContent string    `json:"reasoning_content,omitempty"`
+	RenderedContent  string    `json:"-"` // Runtime-only cached glamour output
 	Command          string    `json:"command,omitempty"`
 	Result           string    `json:"result,omitempty"`
 	Denied           bool      `json:"denied,omitempty"`
@@ -87,6 +88,7 @@ type Model struct {
 	interruptCh              chan struct{}
 	lastEscTime              time.Time
 	bypassPermissions        bool
+	markdownDirty            bool
 }
 
 // separatorStyle and statusStyle are defined in theme.go
@@ -199,7 +201,20 @@ func (m *Model) updateMarkdownRenderer() {
 	}
 }
 
+func (m *Model) appendAssistantEntry(entry ChatEntry) {
+	if r, err := m.markdownRenderer.Render(entry.Content); err == nil {
+		entry.RenderedContent = r
+	}
+	m.messages = append(m.messages, entry)
+}
+
 func (m *Model) refreshViewport() {
+	if m.markdownDirty {
+		for i := range m.messages {
+			m.messages[i].RenderedContent = ""
+		}
+		m.markdownDirty = false
+	}
 	m.viewport.SetContent(renderMessages(m.messages, m.permission, m.width, m.markdownRenderer, m.streamingContent, m.streamingThinkingContent))
 	m.viewport.GotoBottom()
 }
@@ -219,6 +234,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport = viewport.New(m.width, vpHeight)
 			m.textarea.SetWidth(taWidth)
 			m.updateMarkdownRenderer()
+			m.markdownDirty = true
 			m.refreshViewport()
 			m.ready = true
 		} else {
@@ -226,6 +242,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.Height = vpHeight
 			m.textarea.SetWidth(taWidth)
 			m.updateMarkdownRenderer()
+			m.markdownDirty = true
 			m.refreshViewport()
 		}
 
