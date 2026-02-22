@@ -6,20 +6,20 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-"sync"
+	"sync"
 )
 
 const settingsFile = ".yaca/settings.json"
 
+// fileData is used for JSON persistence (API keys no longer stored in file)
 type fileData struct {
-	ActiveModel string            `json:"active_model"`
-	APIKeys     map[string]string `json:"api_keys"`
+	ActiveModel string `json:"active_model"`
 }
 
 type Settings struct {
 	mu          sync.Mutex
 	activeModel string
-	apiKeys     map[string]string
+	keyStore    *KeyStore
 	dir         string
 }
 
@@ -34,8 +34,8 @@ func dir() string {
 func Load() (*Settings, error) {
 	d := dir()
 	s := &Settings{
-		dir:     d,
-		apiKeys: make(map[string]string),
+		dir:      d,
+		keyStore: NewKeyStore(),
 	}
 	data, err := os.ReadFile(filepath.Join(d, settingsFile))
 	if err != nil {
@@ -49,9 +49,6 @@ func Load() (*Settings, error) {
 		return s, err
 	}
 	s.activeModel = fd.ActiveModel
-	if fd.APIKeys != nil {
-		s.apiKeys = fd.APIKeys
-	}
 	return s, nil
 }
 
@@ -68,13 +65,14 @@ func (s *Settings) saveLocked() error {
 	}
 	fd := fileData{
 		ActiveModel: s.activeModel,
-		APIKeys:     s.apiKeys,
+		// API keys are no longer stored in file - they go to keychain
 	}
 	data, err := json.MarshalIndent(fd, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(s.dir, settingsFile), data, 0o644)
+	// Use 0600 for settings file (contains user preferences)
+	return os.WriteFile(filepath.Join(s.dir, settingsFile), data, 0o600)
 }
 
 func (s *Settings) ActiveModel() string {
@@ -91,16 +89,23 @@ func (s *Settings) SetActiveModel(name string) error {
 }
 
 // APIKey returns the stored API key for the given provider key name (e.g. "Z_API").
+// Checks environment variables first, then OS keychain.
 func (s *Settings) APIKey(keyName string) string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.apiKeys[keyName]
+	return s.keyStore.Get(keyName)
 }
 
-// SetAPIKey stores an API key under the given provider key name and persists to disk.
+// SetAPIKey stores an API key securely in the OS keychain.
+// Falls back to environment variable suggestion if keychain unavailable.
 func (s *Settings) SetAPIKey(keyName, key string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.apiKeys[keyName] = key
-	return s.saveLocked()
+	return s.keyStore.Set(keyName, key)
+}
+
+// DeleteAPIKey removes an API key from secure storage.
+func (s *Settings) DeleteAPIKey(keyName string) error {
+	return s.keyStore.Delete(keyName)
+}
+
+// IsKeyringAvailable returns true if OS keychain is accessible.
+func (s *Settings) IsKeyringAvailable() bool {
+	return s.keyStore.IsKeyringAvailable()
 }
