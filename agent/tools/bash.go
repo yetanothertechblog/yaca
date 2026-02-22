@@ -2,6 +2,7 @@ package tools
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -28,48 +29,58 @@ func init() {
 			},
 			"required": ["command"]
 		}`),
-		Run: executeBash,
+		Run:        executeBash,
+		RunContext: executeBashContext,
 	})
 }
 
 func executeBash(args BashArgs, workingDir string) (ToolResult, error) {
+	return executeBashContext(context.Background(), args, workingDir)
+}
+
+func executeBashContext(ctx context.Context, args BashArgs, workingDir string) (ToolResult, error) {
 	if args.Command == "" {
 		return ToolResult{}, NewToolError(ErrMissingField, "command is required")
 	}
 
-	cmd := exec.Command("bash", "-c", args.Command)
+	// Create a context with timeout for the command execution
+	cmdCtx, cancel := context.WithTimeout(ctx, bashTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(cmdCtx, "bash", "-c", args.Command)
 	cmd.Dir = workingDir
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Run()
-	}()
+	err := cmd.Run()
 
-	select {
-	case err := <-done:
-		output := stdout.String()
-		if stderr.Len() > 0 {
-			if output != "" {
-				output += "\n"
-			}
-			output += stderr.String()
-		}
-		if err != nil {
-			if output != "" {
-				output += "\n"
-			}
-			output += fmt.Sprintf("exit status: %v", err)
-		}
-		if output == "" {
-			output = "(no output)"
-		}
-		return ToolResult{Output: output}, nil
-	case <-time.After(bashTimeout):
-		cmd.Process.Kill()
-		return ToolResult{}, fmt.Errorf("command timed out after 30s")
+	// Capture context error once to avoid TOCTOU race — the context state
+	// could change between successive checks of cmdCtx.Err().
+	ctxErr := cmdCtx.Err()
+	if ctxErr == context.DeadlineExceeded {
+		return ToolResult{}, fmt.Errorf("command timed out after %v", bashTimeout)
 	}
+	if ctxErr == context.Canceled {
+		return ToolResult{}, ctx.Err()
+	}
+
+	output := stdout.String()
+	if stderr.Len() > 0 {
+		if output != "" {
+			output += "\n"
+		}
+		output += stderr.String()
+	}
+	if err != nil {
+		if output != "" {
+			output += "\n"
+		}
+		output += fmt.Sprintf("exit status: %v", err)
+	}
+	if output == "" {
+		output = "(no output)"
+	}
+	return ToolResult{Output: output}, nil
 }

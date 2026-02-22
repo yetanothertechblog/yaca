@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 
 	"go-tui/llm"
@@ -30,6 +31,18 @@ func Execute(name string, argsJSON string, workingDir string) (ToolResult, error
 	t, ok := registry[name]
 	if !ok {
 		return ToolResult{}, fmt.Errorf("unknown tool: %s", name)
+	}
+	return t.Execute(argsJSON, workingDir)
+}
+
+func ExecuteContext(ctx context.Context, name string, argsJSON string, workingDir string) (ToolResult, error) {
+	t, ok := registry[name]
+	if !ok {
+		return ToolResult{}, fmt.Errorf("unknown tool: %s", name)
+	}
+	// Use context-aware execution if the tool supports it; otherwise fall back.
+	if ce, ok := t.(ContextExecutor); ok {
+		return ce.ExecuteContext(ctx, argsJSON, workingDir)
 	}
 	return t.Execute(argsJSON, workingDir)
 }

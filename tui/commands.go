@@ -1,13 +1,15 @@
 package tui
 
 import (
+	"context"
 	"log"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"go-tui/agent"
 	"go-tui/agent/tools"
+	"go-tui/conversation"
 	"go-tui/llm"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -16,10 +18,11 @@ import (
 // Messages
 
 type LLMResponseMsg struct {
-	Content   string
-	ToolCalls []llm.ToolCall
-	Usage     *llm.Usage
-	Err       error
+	Content          string
+	ReasoningContent string
+	ToolCalls        []llm.ToolCall
+	Usage            *llm.Usage
+	Err              error
 }
 
 type ToolResultMsg struct {
@@ -30,11 +33,15 @@ type ToolResultMsg struct {
 	Err        error
 }
 
-// StreamTokenCountMsg is sent periodically during streaming to update the token counter.
-type StreamTokenCountMsg struct {
-	Count    int
-	Thinking bool
-	ch       <-chan tea.Msg
+// StreamChunkMsg carries debounced content from the LLM stream.
+// The producer goroutine batches fragments with a 16ms AfterFunc timer so the
+// model only receives a message after the stream has been quiet for 16ms.
+// Regular assistant tokens go in Content; extended-thinking tokens go in ThinkingContent.
+type StreamChunkMsg struct {
+	Content         string
+	ThinkingContent string
+	Thinking        bool
+	ch              <-chan tea.Msg // continuation channel
 }
 
 type CompactResultMsg struct {
@@ -65,6 +72,15 @@ type UserInputMsg struct {
 	Text string
 }
 
+type ModelSwitchedMsg struct {
+	Name string
+	Err  error
+}
+
+type ResumeConversationMsg struct {
+	Conv *conversation.Data
+}
+
 const (
 	PermissionAllow PermissionDecision = iota
 	PermissionAlwaysAllow
@@ -86,38 +102,86 @@ func callLLMInterruptible(a *agent.Agent, history []llm.Message, interruptCh <-c
 	go func() {
 		defer close(ch)
 
-		var wordCount int64
-		var thinking int32
+		// Create a context that can be cancelled when interruptCh is triggered
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
-		onContent := func(content string, isThinking bool) {
-			if isThinking {
-				atomic.StoreInt32(&thinking, 1)
-			} else {
-				atomic.StoreInt32(&thinking, 0)
-			}
-			words := int64(len(strings.Fields(content)))
-			total := atomic.AddInt64(&wordCount, words)
-			estimated := int(float64(total) * 0.75)
+		// Watch for interruption and cancel the context
+		go func() {
 			select {
-			case ch <- StreamTokenCountMsg{
-				Count:    estimated,
-				Thinking: atomic.LoadInt32(&thinking) == 1,
-				ch:       ch,
-			}:
-			default:
+			case <-interruptCh:
+				cancel()
+			case <-ctx.Done():
+				// Context already cancelled, nothing to do
+			}
+		}()
+
+		var mu sync.Mutex
+		var buf strings.Builder
+		var thinkingBuf strings.Builder
+		var thinking bool
+		var timer *time.Timer
+
+		// send drains both buffers and emits a StreamChunkMsg.
+		// Must NOT be called with mu held.
+		send := func() {
+			mu.Lock()
+			chunk := buf.String()
+			thinkingChunk := thinkingBuf.String()
+			isThinking := thinking
+			buf.Reset()
+			thinkingBuf.Reset()
+			mu.Unlock()
+			if chunk == "" && thinkingChunk == "" {
+				return
+			}
+			select {
+			case ch <- StreamChunkMsg{Content: chunk, ThinkingContent: thinkingChunk, Thinking: isThinking, ch: ch}:
+			default: // drop if full; LLMResponseMsg carries the complete text
 			}
 		}
 
-		result, err := llm.CallLLMStream(messages, tools.All(), onContent)
+		onContent := func(content string, isThinking bool) {
+			mu.Lock()
+			if isThinking {
+				thinkingBuf.WriteString(content)
+			} else {
+				buf.WriteString(content)
+			}
+			thinking = isThinking
+			if timer != nil {
+				timer.Stop()
+			}
+			timer = time.AfterFunc(16*time.Millisecond, send)
+			mu.Unlock()
+		}
+
+		result, err := llm.CallLLMStream(ctx, messages, tools.All(), onContent)
+
+		// Cancel the pending timer and flush any remaining buffered content.
+		mu.Lock()
+		if timer != nil {
+			timer.Stop()
+			timer = nil
+		}
+		mu.Unlock()
+		send()
+
 		if err != nil {
+			// Check if the error was due to cancellation
+			if ctx.Err() == context.Canceled {
+				log.Printf("llm stream cancelled by user")
+				return
+			}
 			log.Printf("llm error: %v", err)
 			ch <- LLMResponseMsg{Err: err}
 			return
 		}
 		ch <- LLMResponseMsg{
-			Content:   result.Delta.Content,
-			ToolCalls: result.Delta.ToolCalls,
-			Usage:     result.Usage,
+			Content:          result.Delta.Content,
+			ReasoningContent: result.Delta.ReasoningContent,
+			ToolCalls:        result.Delta.ToolCalls,
+			Usage:            result.Usage,
 		}
 	}()
 
@@ -126,34 +190,14 @@ func callLLMInterruptible(a *agent.Agent, history []llm.Message, interruptCh <-c
 
 func waitForStreamInterruptible(ch <-chan tea.Msg, interruptCh <-chan struct{}) tea.Cmd {
 	return func() tea.Msg {
-		time.Sleep(100 * time.Millisecond)
-		var latest tea.Msg
-		for {
-			select {
-			case msg, ok := <-ch:
-				if !ok {
-					return latest
-				}
-				latest = msg
-				if _, isToken := msg.(StreamTokenCountMsg); !isToken {
-					return msg
-				}
-			case <-interruptCh:
-				return InterruptMsg{Reason: "User interrupted"}
-			default:
-				if latest != nil {
-					return latest
-				}
-				select {
-				case msg, ok := <-ch:
-					if !ok {
-						return nil
-					}
-					return msg
-				case <-interruptCh:
-					return InterruptMsg{Reason: "User interrupted"}
-				}
+		select {
+		case msg, ok := <-ch:
+			if !ok {
+				return nil
 			}
+			return msg
+		case <-interruptCh:
+			return InterruptMsg{Reason: "User interrupted"}
 		}
 	}
 }
@@ -197,9 +241,19 @@ func executeToolInterruptible(a *agent.Agent, tc llm.ToolCall, interruptCh <-cha
 
 	return func() tea.Msg {
 		done := make(chan tea.Msg, 1)
+
+		// Create a context for tool cancellation
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
 		go func() {
-			result, err := a.ExecuteTool(name, args)
+			result, err := a.ExecuteToolContext(ctx, name, args)
 			if err != nil {
+				// Check if the error was due to cancellation
+				if ctx.Err() == context.Canceled {
+					log.Printf("tool %s cancelled by user", name)
+					return
+				}
 				log.Printf("tool error: %v", err)
 				done <- ToolResultMsg{
 					ToolCallID: id,
@@ -222,10 +276,15 @@ func executeToolInterruptible(a *agent.Agent, tc llm.ToolCall, interruptCh <-cha
 		if interruptCh == nil {
 			return <-done
 		}
+
+		// If the tool completes at the exact moment an interrupt fires, the
+		// select may take the interruptCh branch, discarding the result. The
+		// buffered done channel (size 1) ensures the goroutine never leaks.
 		select {
 		case msg := <-done:
 			return msg
 		case <-interruptCh:
+			cancel()
 			return InterruptMsg{Reason: "Operation interrupted by user"}
 		}
 	}

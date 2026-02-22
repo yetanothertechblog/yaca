@@ -9,13 +9,18 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-func (m *Model) handleStreamTokenCount(msg StreamTokenCountMsg) (tea.Model, tea.Cmd) {
-	m.streamingTokens = msg.Count
+func (m *Model) handleStreamChunk(msg StreamChunkMsg) (tea.Model, tea.Cmd) {
 	m.streamingThinking = msg.Thinking
+	m.streamingTokens += int(float64(len(strings.Fields(msg.Content))) * 0.75)
+	m.streamingContent += msg.Content
+	m.streamingThinkingContent += msg.ThinkingContent
+	m.refreshViewport()
 	return m, waitForStreamInterruptible(msg.ch, m.interruptCh)
 }
 
 func (m *Model) handleLLMResponse(msg LLMResponseMsg) (tea.Model, tea.Cmd) {
+	m.streamingContent = ""
+	m.streamingThinkingContent = ""
 	m.streamingTokens = 0
 	m.streamingThinking = false
 	if msg.Usage != nil {
@@ -38,11 +43,12 @@ func (m *Model) handleLLMResponse(msg LLMResponseMsg) (tea.Model, tea.Cmd) {
 			Role:    "assistant",
 			Content: msg.Content,
 		})
-		if strings.TrimSpace(msg.Content) != "" {
+		if strings.TrimSpace(msg.Content) != "" || msg.ReasoningContent != "" {
 			m.messages = append(m.messages, ChatEntry{
-				Type:    EntryMessage,
-				Role:    "assistant",
-				Content: msg.Content,
+				Type:             EntryMessage,
+				Role:             "assistant",
+				Content:          msg.Content,
+				ReasoningContent: msg.ReasoningContent,
 			})
 		}
 		m.saveConversation()
@@ -58,11 +64,12 @@ func (m *Model) handleLLMResponse(msg LLMResponseMsg) (tea.Model, tea.Cmd) {
 	})
 
 	// If there's meaningful content alongside tool calls, show it
-	if strings.TrimSpace(msg.Content) != "" {
+	if strings.TrimSpace(msg.Content) != "" || msg.ReasoningContent != "" {
 		m.messages = append(m.messages, ChatEntry{
-			Type:    EntryMessage,
-			Role:    "assistant",
-			Content: msg.Content,
+			Type:             EntryMessage,
+			Role:             "assistant",
+			Content:          msg.Content,
+			ReasoningContent: msg.ReasoningContent,
 		})
 	}
 

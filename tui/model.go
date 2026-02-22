@@ -11,6 +11,8 @@ import (
 	"go-tui/config"
 	"go-tui/conversation"
 	"go-tui/llm"
+	"go-tui/permissions"
+	"go-tui/settings"
 	"go-tui/tui/slashcmd"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -29,61 +31,67 @@ const (
 )
 
 type DiffData struct {
-	FilePath     string `json:"file_path"`
-	OldText      string `json:"old_text"`
-	NewText      string `json:"new_text"`
-	StartLine    int    `json:"start_line,omitempty"`
-	BlockReplace bool   `json:"block_replace,omitempty"` // true for edit_file: show as block replacement
+	FilePath  string `json:"file_path"`
+	OldText   string `json:"old_text"`
+	NewText   string `json:"new_text"`
+	StartLine int    `json:"start_line,omitempty"`
 }
 
 type ChatEntry struct {
-	Type    EntryType `json:"type"`
-	Role    string    `json:"role,omitempty"`
-	Content string    `json:"content,omitempty"`
-	Command string    `json:"command,omitempty"`
-	Result  string    `json:"result,omitempty"`
-	Denied  bool      `json:"denied,omitempty"`
-	Diff    *DiffData `json:"diff,omitempty"`
-	Error   string    `json:"error,omitempty"`
+	Type             EntryType `json:"type"`
+	Role             string    `json:"role,omitempty"`
+	Content          string    `json:"content,omitempty"`
+	ReasoningContent string    `json:"reasoning_content,omitempty"`
+	Command          string    `json:"command,omitempty"`
+	Result           string    `json:"result,omitempty"`
+	Denied           bool      `json:"denied,omitempty"`
+	Diff             *DiffData `json:"diff,omitempty"`
+	Error            string    `json:"error,omitempty"`
 }
 
 const maxToolRounds = config.MaxToolRounds
 const maxConsecutiveErrors = 3
 
 type Model struct {
-	viewport           viewport.Model
-	textarea           textarea.Model
-	spinner            spinner.Model
-	messages           []ChatEntry
-	agent              *agent.Agent
-	waiting            bool
-	width              int
-	height             int
-	ready              bool
-	permission         *PermissionPrompt
-	conv               *conversation.Data
-	convDir            string
-	markdownRenderer   *MarkdownRenderer
-	history            []llm.Message
-	workingDir         string
-	alwaysAllow        map[string]bool
-	toolRoundCount     int
-	consecutiveErrors  int
-	pendingToolCalls   []llm.ToolCall
-	pendingToolIndex   int
-	awaitingPermission *llm.ToolCall
-	totalTokens        int
-	streamingTokens    int
-	streamingThinking  bool
-	slashOverlay       *slashcmd.Overlay
-	rewindOverlay      *slashcmd.RewindOverlay
-	interruptCh        chan struct{}
-	lastEscTime        time.Time
+	viewport                 viewport.Model
+	textarea                 textarea.Model
+	spinner                  spinner.Model
+	messages                 []ChatEntry
+	agent                    *agent.Agent
+	waiting                  bool
+	width                    int
+	height                   int
+	ready                    bool
+	permission               *PermissionPrompt
+	conv                     *conversation.Data
+	convDir                  string
+	markdownRenderer         *MarkdownRenderer
+	history                  []llm.Message
+	workingDir               string
+	permissions              *permissions.Permissions
+	toolRoundCount           int
+	consecutiveErrors        int
+	pendingToolCalls         []llm.ToolCall
+	pendingToolIndex         int
+	awaitingPermission       *llm.ToolCall
+	totalTokens              int
+	streamingTokens          int
+	streamingThinking        bool
+	streamingContent         string
+	streamingThinkingContent string
+	slashOverlay             *slashcmd.Overlay
+	rewindOverlay            *slashcmd.RewindOverlay
+	conversationOverlay      *slashcmd.RewindOverlay
+	modelOverlay             *slashcmd.ModelOverlay
+	settings                 *settings.Settings
+	interruptCh              chan struct{}
+	lastEscTime              time.Time
+	bypassPermissions        bool
 }
 
 // separatorStyle and statusStyle are defined in theme.go
 
-func New(workingDir string, conv *conversation.Data) Model {
+func New(workingDir string, conv *conversation.Data, s *settings.Settings) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message..."
 	ta.Focus()
@@ -91,9 +99,9 @@ func New(workingDir string, conv *conversation.Data) Model {
 	ta.SetHeight(config.TextareaHeight)
 	ta.CharLimit = 0
 
-	s := spinner.New()
-	s.Spinner = spinner.Points
-	s.Style = spinnerStyle
+	sp := spinner.New()
+	sp.Spinner = spinner.Points
+	sp.Style = spinnerStyle
 
 	// Initialize markdown renderer before the TUI event loop starts,
 	// so the terminal color query (from "auto" style) completes before
@@ -119,22 +127,33 @@ func New(workingDir string, conv *conversation.Data) Model {
 		log.Printf("failed to unmarshal agent history: %v", err)
 	}
 
+	perms, err := permissions.Load(workingDir)
+	if err != nil {
+		log.Printf("failed to load permissions: %v", err)
+	}
+
 	return Model{
 		textarea:         ta,
-		spinner:          s,
+		spinner:          sp,
 		messages:         messages,
 		agent:            a,
 		conv:             conv,
-		convDir:          conversation.Dir(workingDir),
+		convDir:          conversation.Dir(),
 		markdownRenderer: markdownRenderer,
 		history:          history,
 		workingDir:       workingDir,
-		alwaysAllow:      make(map[string]bool),
+		permissions:      perms,
+		settings:         s,
 	}
 }
 
 func (m *Model) Shutdown() {
 	m.agent.Shutdown()
+}
+
+// ConversationID returns the ID of the current conversation.
+func (m *Model) ConversationID() string {
+	return m.conv.ID
 }
 
 func (m *Model) saveConversation() {
@@ -170,7 +189,6 @@ func (m *Model) appendError(errMsg string) {
 	}
 }
 
-
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(textarea.Blink, spinner.Tick)
 }
@@ -182,7 +200,7 @@ func (m *Model) updateMarkdownRenderer() {
 }
 
 func (m *Model) refreshViewport() {
-	m.viewport.SetContent(renderMessages(m.messages, m.permission, m.width, m.markdownRenderer))
+	m.viewport.SetContent(renderMessages(m.messages, m.permission, m.width, m.markdownRenderer, m.streamingContent, m.streamingThinkingContent))
 	m.viewport.GotoBottom()
 }
 
@@ -193,8 +211,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		// statusLine(1) + separator(1) + textarea(3) + separator(1) = 6
-		vpHeight := m.height - 6
+		// statusLine(1) + separator(1) + textarea(3) + separator(1) + bypassLine(1) = 7
+		vpHeight := m.height - 7
 		taWidth := m.width
 
 		if !m.ready {
@@ -221,8 +239,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return handleKeyMsg(m, msg)
 
-	case StreamTokenCountMsg:
-		return m.handleStreamTokenCount(msg)
+	case StreamChunkMsg:
+		return m.handleStreamChunk(msg)
 
 	case LLMResponseMsg:
 		return m.handleLLMResponse(msg)
@@ -236,11 +254,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case InterruptMsg:
 		return m.handleInterrupt(msg)
 
+	case ModelSwitchedMsg:
+		return m.handleModelSwitched(msg)
+
 	case RewindToMessageMsg:
 		return m.handleRewind(msg)
 
 	case PermissionDecisionMsg:
 		return m.handlePermissionDecision(msg)
+
+	case ResumeConversationMsg:
+		return m.handleResumeConversation(msg)
 
 	case UserInputMsg:
 		return m.handleUserInput(msg)
@@ -275,8 +299,12 @@ func (m *Model) View() string {
 
 	vpView := m.viewport.View()
 
-	if m.rewindOverlay != nil {
+	if m.modelOverlay != nil {
+		vpView = m.modelOverlay.View(m.width, m.viewport.Height)
+	} else if m.rewindOverlay != nil {
 		vpView = m.rewindOverlay.View(m.width, m.viewport.Height)
+	} else if m.conversationOverlay != nil {
+		vpView = m.conversationOverlay.View(m.width, m.viewport.Height)
 	} else if m.slashOverlay != nil {
 		overlay := m.slashOverlay.View(m.width)
 		if overlay != "" {
@@ -290,6 +318,13 @@ func (m *Model) View() string {
 		}
 	}
 
+	bypassLine := " "
+	if m.bypassPermissions {
+		bypassLine = bypassStyle.Render(">> Bypass Permissions (Shift+Tab to toggle mode)")
+	} else {
+		bypassLine = requirePermissionsStyle.Render("⏸ Ask For Permissions (Shift+Tab to toggle mode)")
+	}
+
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		vpView,
@@ -297,6 +332,7 @@ func (m *Model) View() string {
 		separator,
 		inputArea,
 		separator,
+		bypassLine,
 	)
 }
 
@@ -315,18 +351,13 @@ func (m *Model) renderStatusLine() string {
 		}
 	}
 
-	// Right: <token label> <bar>
-	tokenLabel := statusStyle.Render(fmt.Sprintf("%d/%d ", m.totalTokens, config.MaxContextTokens))
-	barMaxWidth := m.width * 40 / 100
-	if barMaxWidth < 1 {
-		barMaxWidth = 1
+	// Right: <model name> · <token counter>
+	modelLabel := ""
+	if name := m.settings.ActiveModel(); name != "" {
+		modelLabel = statusStyle.Render(name + " · ")
 	}
-	displayTokens := m.totalTokens
-	if displayTokens < 1000 {
-		displayTokens = 1000
-	}
-	bar := renderBar(displayTokens, config.MaxContextTokens, barMaxWidth)
-	right := tokenLabel + bar + "  "
+	tokenLabel := statusStyle.Render(fmt.Sprintf("%d/%d Tokens", m.totalTokens, config.MaxContextTokens))
+	right := modelLabel + tokenLabel + "  "
 
 	// Layout: <left> <gap> <right>
 	leftWidth := lipgloss.Width(left)
@@ -336,15 +367,4 @@ func (m *Model) renderStatusLine() string {
 		gap = 1
 	}
 	return left + strings.Repeat(" ", gap) + right
-}
-
-func renderBar(value, max, width int) string {
-	ratio := float64(value) / float64(max)
-	if ratio > 1 {
-		ratio = 1
-	}
-	filled := int(ratio * float64(width))
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
-
-	return lipgloss.NewStyle().Foreground(tokenBarColor(ratio)).Render(bar)
 }

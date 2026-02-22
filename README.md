@@ -1,9 +1,10 @@
-# go-tui
+# YACA (Yet Another Coding Agent)
 
-A terminal-based AI coding assistant with rich TUI interface, built with Go and Bubble Tea. Features integrated LSP support for real-time code analysis, comprehensive tool ecosystem, and conversation persistence.
+A lightweight, terminal-based AI coding assistant with rich TUI interface. Built with Go and Bubble Tea for a single, self-contained binary with integrated LSP support, comprehensive tool ecosystem, and conversation persistence.
 
 ## Features
 
+- **Lightweight Binary**: Single, self-contained Go binary with no external dependencies
 - **AI Coding Assistant**: Expert coding assistant that helps write, debug, and improve code with integrated LSP support
 - **Rich Terminal UI**: Clean, responsive TUI using Bubble Tea framework with keyboard navigation and markdown rendering
 - **Language Server Protocol (LSP)**: Real-time code analysis and diagnostics for multiple programming languages
@@ -13,9 +14,10 @@ A terminal-based AI coding assistant with rich TUI interface, built with Go and 
 - **Permission System**: Interactive permission requests for potentially dangerous operations
 - **Code Diff Visualization**: Visual diffs for file edits with side-by-side comparison
 - **Task Management**: Integrated beads CLI for task tracking and project management
-- **Logging Support**: Debug logging for monitoring and troubleshooting
 
 ## Architecture Overview
+
+YACA (Yet Another Coding Agent) is built with a modular architecture:
 
 ```
 go-tui/
@@ -73,15 +75,19 @@ go-tui/
 
 ## Getting Started
 
-1. **Install dependencies**:
-   ```bash
-   go mod tidy
-   ```
-
-2. **Set up your LLM API key**:
+1. **Set up your LLM API key**:
    ```bash
    # Create .env file in project root
    echo "ZAI_API_KEY=your-api-key-here" > .env
+   ```
+
+2. **Build the lightweight binary**:
+   ```bash
+   # Build for current platform
+   go build -o yaca .
+   
+   # Or build and run directly
+   go run .
    ```
 
 3. **Install language servers** (optional, for LSP support):
@@ -96,17 +102,12 @@ go-tui/
    pip install python-lsp-server
    ```
 
-4. **Run the application**:
-   ```bash
-   go run .
-   ```
-
 ## Usage
 
 ### Basic Commands
-- Start a new conversation: `go run .`
-- Resume a specific conversation: `go run . -resume <uuid>`
-- Resume the latest conversation: `go run . -resume`
+- Start a new conversation: `./yaca` or `go run .`
+- Resume a specific conversation: `./yaca -resume <uuid>` or `go run . -resume <uuid>`
+- Resume the latest conversation: `./yaca -resume` or `go run . -resume`
 
 ### Available Tools
 The AI assistant has access to these tools:
@@ -132,10 +133,18 @@ The AI assistant has access to these tools:
 
 ## Requirements
 
-- Go 1.25+
+- Go 1.25+ (for building)
 - [Z.AI API key](https://z.ai/) (currently supported)
 - Terminal with UTF-8 support
 - Optional: Language servers for LSP support
+
+## Build Output
+
+YACA produces a single, lightweight binary with no external runtime dependencies. The binary contains:
+- Complete TUI framework
+- All built-in tools and functionality
+- LSP integration capabilities
+- Conversation persistence system
 
 ## Configuration
 

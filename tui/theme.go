@@ -9,7 +9,7 @@ var (
 	colorBrass      = lipgloss.Color("#B5A642")
 	colorCopper     = lipgloss.Color("#B87333")
 	colorBronze     = lipgloss.Color("#CD7F32")
-	colorRust       = lipgloss.Color("#B7410E")
+	colorRust       = lipgloss.Color("#FF0000")
 	colorSteam      = lipgloss.Color("#C8C8B4")
 	colorDarkSteel  = lipgloss.Color("#3B3B2E")
 	colorPatina     = lipgloss.Color("#4A7C6F")
@@ -18,6 +18,7 @@ var (
 	colorParchment  = lipgloss.Color("#D4C5A9")
 	colorDimBrass   = lipgloss.Color("#8B7D3C")
 	colorForgedIron = lipgloss.Color("#555548")
+	colorBlue       = lipgloss.Color("#4169E1")
 )
 
 // Shared styles used across TUI components.
@@ -28,6 +29,10 @@ var (
 
 	statusStyle = lipgloss.NewStyle().
 			Foreground(colorDimBrass)
+
+	bypassStyle = lipgloss.NewStyle().
+			Foreground(colorRust).
+			Bold(true)
 
 	spinnerStyle = lipgloss.NewStyle().
 			Foreground(colorBrass)
@@ -66,6 +71,22 @@ var (
 	diffLineNumStyle = lipgloss.NewStyle().
 				Foreground(colorForgedIron)
 
+	diffAddedLineNumStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#4A8C45")).
+				Background(lipgloss.Color("#2D5A27"))
+
+	diffRemovedLineNumStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#8C3A3A")).
+				Background(lipgloss.Color("#6B1A1A"))
+
+	diffAddedMarkerStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#4A8C45")).
+				Background(lipgloss.Color("#2D5A27"))
+
+	diffRemovedMarkerStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#8C3A3A")).
+				Background(lipgloss.Color("#6B1A1A"))
+
 	toolBulletStyle = lipgloss.NewStyle().
 			Foreground(colorCopper).
 			Bold(true)
@@ -86,20 +107,17 @@ var (
 	permOptionStyle = lipgloss.NewStyle().
 			Foreground(colorParchment)
 
+	requirePermissionsStyle = lipgloss.NewStyle().
+				Foreground(colorBlue)
+
 	permSelectedStyle = lipgloss.NewStyle().
 				Foreground(colorAmber).
 				Bold(true)
 
-)
+	thinkingLabelStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#808080"))
 
-// tokenBarColor returns the appropriate color for the token usage bar.
-func tokenBarColor(ratio float64) lipgloss.Color {
-	switch {
-	case ratio > 0.8:
-		return colorRust
-	case ratio > 0.5:
-		return colorBronze
-	default:
-		return colorPatina
-	}
-}
+	thinkingContentStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#808080")).
+				Italic(true)
+)

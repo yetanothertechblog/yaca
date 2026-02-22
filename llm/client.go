@@ -3,37 +3,76 @@ package llm
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
+	"sync"
 
-	"github.com/joho/godotenv"
+	"go-tui/circuit"
 	"go-tui/config"
+	"go-tui/retry"
 )
 
-const (
-	apiURL    = config.APIURL
-	modelName = config.ModelName
+var (
+	mu          sync.RWMutex
+	activeURL   string
+	activeKey   string
+	activeModel string
+	breaker     = circuit.NewDefault()
 )
 
-var apiKey string
+// Configure sets the active model configuration used by CallLLM and CallLLMStream.
+func Configure(apiURL, apiKey, model string) {
+	mu.Lock()
+	defer mu.Unlock()
+	activeURL = apiURL
+	activeKey = apiKey
+	activeModel = model
+}
 
-func InitAPIKey() error {
-	if err := godotenv.Load(); err != nil {
-		return fmt.Errorf("error loading .env file: %w", err)
-	}
-	apiKey = os.Getenv("ZAI_API_KEY")
-	if apiKey == "" {
-		return fmt.Errorf("ZAI_API_KEY not set in .env file")
-	}
-	return nil
+func getConfig() (string, string, string) {
+	mu.RLock()
+	defer mu.RUnlock()
+	return activeURL, activeKey, activeModel
+}
+
+func GetCircuitBreakerStats() circuit.Stats {
+	return breaker.GetStats()
+}
+
+func ResetCircuitBreaker() {
+	breaker.Reset()
+}
+
+var retryCfg = retry.Config{
+	MaxAttempts: config.MaxRetryAttempts,
+	BaseDelay:   config.RetryBaseDelay,
+	MaxDelay:    config.RetryMaxDelay,
+	Jitter:      config.RetryJitter,
 }
 
 func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
+	var result *LLMResult
+	err := breaker.Execute(func() error {
+		return retry.Do(context.Background(), retryCfg, func() error {
+			var err error
+			result, err = doCallLLM(messages, tools)
+			return err
+		})
+	})
+	return result, err
+}
+
+func doCallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
+	url, key, model := getConfig()
+	if url == "" || key == "" || model == "" {
+		return nil, fmt.Errorf("LLM not configured: call Configure() first")
+	}
+
 	req := ChatRequest{
-		Model:    modelName,
+		Model:    model,
 		Messages: messages,
 		Tools:    tools,
 		Stream:   false,
@@ -44,12 +83,12 @@ func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", apiURL, bytes.NewReader(body))
+	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+key)
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
@@ -60,7 +99,7 @@ func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 	if resp.StatusCode != http.StatusOK {
 		var errBody bytes.Buffer
 		errBody.ReadFrom(resp.Body)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, errBody.String())
+		return nil, &retry.APIError{StatusCode: resp.StatusCode, Body: errBody.String()}
 	}
 
 	var chatResp ChatResponse
@@ -78,9 +117,26 @@ func CallLLM(messages []Message, tools []Tool) (*LLMResult, error) {
 	}, nil
 }
 
-func CallLLMStream(messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
+// CallLLMStream uses the circuit breaker but does NOT retry, since partial
+// content may have already been streamed to the caller.
+func CallLLMStream(ctx context.Context, messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
+	var result *LLMResult
+	err := breaker.Execute(func() error {
+		var err error
+		result, err = doCallLLMStream(ctx, messages, tools, onContent)
+		return err
+	})
+	return result, err
+}
+
+func doCallLLMStream(ctx context.Context, messages []Message, tools []Tool, onContent func(string, bool)) (*LLMResult, error) {
+	url, key, model := getConfig()
+	if url == "" || key == "" || model == "" {
+		return nil, fmt.Errorf("LLM not configured: call Configure() first")
+	}
+
 	req := ChatRequest{
-		Model:    modelName,
+		Model:    model,
 		Messages: messages,
 		Tools:    tools,
 		Stream:   true,
@@ -91,12 +147,12 @@ func CallLLMStream(messages []Message, tools []Tool, onContent func(string, bool
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", apiURL, bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	httpReq.Header.Set("Authorization", "Bearer "+key)
 
 	resp, err := http.DefaultClient.Do(httpReq)
 	if err != nil {
@@ -107,7 +163,7 @@ func CallLLMStream(messages []Message, tools []Tool, onContent func(string, bool
 	if resp.StatusCode != http.StatusOK {
 		var errBody bytes.Buffer
 		errBody.ReadFrom(resp.Body)
-		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, errBody.String())
+		return nil, &retry.APIError{StatusCode: resp.StatusCode, Body: errBody.String()}
 	}
 
 	full := &Delta{}

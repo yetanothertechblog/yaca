@@ -1,7 +1,10 @@
 package agent
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"go-tui/agent/tools"
 	"go-tui/llm"
@@ -24,7 +27,9 @@ Rules:
 - Use the tools available to you when needed.
 - When reading files, use paths relative to the working directory unless an absolute path is given.
 - The system automatically runs LSP diagnostics after editing files to catch errors.
-- Consider LSP feedback when making code changes and fix any reported issues.`
+- Consider LSP feedback when making code changes and fix any reported issues.
+
+%s`
 
 type Agent struct {
 	workingDir string
@@ -46,11 +51,25 @@ func (a *Agent) WorkingDir() string {
 }
 
 func (a *Agent) SystemPrompt() string {
-	return fmt.Sprintf(systemPromptTemplate, a.workingDir)
+	yacaContent := a.readYacaMarkdown()
+	return fmt.Sprintf(systemPromptTemplate, a.workingDir, yacaContent)
+}
+
+// readYacaMarkdown reads the YACA.md file and returns it wrapped in project_info tags
+func (a *Agent) readYacaMarkdown() string {
+	yacaPath := filepath.Join(a.workingDir, "YACA.md")
+	if data, err := os.ReadFile(yacaPath); err == nil {
+		return "\n<project_info>\n" + string(data) + "\n</project_info>"
+	}
+	return ""
 }
 
 func (a *Agent) ExecuteTool(name, argsJSON string) (tools.ToolResult, error) {
 	return tools.Execute(name, argsJSON, a.workingDir)
+}
+
+func (a *Agent) ExecuteToolContext(ctx context.Context, name, argsJSON string) (tools.ToolResult, error) {
+	return tools.ExecuteContext(ctx, name, argsJSON, a.workingDir)
 }
 
 func (a *Agent) Tools() []llm.Tool {

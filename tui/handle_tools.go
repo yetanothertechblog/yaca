@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"log"
 	"strings"
 
 	"go-tui/llm"
+	"go-tui/permissions"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -59,7 +61,15 @@ func (m *Model) handlePermissionDecision(msg PermissionDecisionMsg) (tea.Model, 
 		return m, executeToolInterruptible(m.agent, msg.ToolCall, m.interruptCh)
 
 	case PermissionAlwaysAllow:
-		m.alwaysAllow[msg.ToolCall.Function.Name] = true
+		entry := msg.ToolCall.Function.Name
+		if entry == "bash" {
+			if prefix := permissions.BashCommandPrefix(msg.ToolCall.Function.Arguments); prefix != "" {
+				entry = permissions.BashEntry(prefix)
+			}
+		}
+		if err := m.permissions.Add(entry); err != nil {
+			log.Printf("failed to save permission: %v", err)
+		}
 		return m, executeToolInterruptible(m.agent, msg.ToolCall, m.interruptCh)
 
 	case PermissionDeny:
@@ -115,7 +125,7 @@ func (m *Model) dispatchNextTool() tea.Cmd {
 
 	tc := m.pendingToolCalls[m.pendingToolIndex]
 
-	if m.alwaysAllow[tc.Function.Name] {
+	if m.bypassPermissions || m.permissions.IsAllowed(tc.Function.Name, tc.Function.Arguments) {
 		return executeToolInterruptible(m.agent, tc, m.interruptCh)
 	}
 

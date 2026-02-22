@@ -14,10 +14,19 @@ func canGroupToolCall(entry ChatEntry) bool {
 	return name == "read_file" || name == "list_files" || name == "search"
 }
 
+func isBlankAssistant(e ChatEntry) bool {
+	return e.Type == EntryMessage &&
+		strings.TrimSpace(e.Content) == "" &&
+		strings.TrimSpace(e.ReasoningContent) == ""
+}
+
 func findGroupEnd(messages []ChatEntry, start int) int {
 	end := start
 	for i := start + 1; i < len(messages); i++ {
 		entry := messages[i]
+		if isBlankAssistant(entry) {
+			continue
+		}
 		if entry.Type != EntryToolCall || entry.Denied || !canGroupToolCall(entry) {
 			break
 		}
@@ -42,7 +51,14 @@ func countOperations(group []ChatEntry) (reads, searches, lists int) {
 }
 
 func renderGroupedToolCalls(group []ChatEntry) string {
-	reads, searches, lists := countOperations(group)
+	var toolEntries []ChatEntry
+	for _, e := range group {
+		if canGroupToolCall(e) {
+			toolEntries = append(toolEntries, e)
+		}
+	}
+
+	reads, searches, lists := countOperations(toolEntries)
 
 	var parts []string
 	if reads > 0 {
@@ -60,12 +76,12 @@ func renderGroupedToolCalls(group []ChatEntry) string {
 	// Show last 3 tool call titles indented
 	maxShown := 3
 	var titles []string
-	for i := len(group) - 1; i >= 0; i-- {
-		if len(group)-i > maxShown {
-			titles = append(titles, fmt.Sprintf("...%d more", len(group)-maxShown))
+	for i := len(toolEntries) - 1; i >= 0; i-- {
+		if len(toolEntries)-i > maxShown {
+			titles = append(titles, fmt.Sprintf("...%d more", len(toolEntries)-maxShown))
 			break
 		}
-		titles = append(titles, formatCommand(group[i].Command))
+		titles = append(titles, formatCommand(toolEntries[i].Command))
 	}
 
 	return header + "\n" + indentBlock(strings.Join(titles, "\n"))

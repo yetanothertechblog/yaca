@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"go-tui/config"
-
 	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
@@ -21,14 +19,11 @@ func renderDiff(d DiffData) string {
 	var sb strings.Builder
 
 	if d.OldText == "" {
-		icon := config.WriteIcon
-		sb.WriteString(diffHeaderStyle.Render(icon + d.FilePath + " (new file)"))
-		sb.WriteString("\n")
-
 		for i, line := range strings.Split(d.NewText, "\n") {
-			num := diffLineNumStyle.Render(fmt.Sprintf("   %4d ", i+1))
-			sb.WriteString(num + diffAddedStyle.Render("+ "+line))
-			sb.WriteString("\n")
+			num := diffAddedLineNumStyle.Render(fmt.Sprintf("   %4d ", i+1))
+			marker := diffAddedMarkerStyle.Render("+")
+			content := diffAddedStyle.Render(" " + line)
+			sb.WriteString(num + marker + content + "\n")
 		}
 		return strings.TrimRight(sb.String(), "\n")
 	}
@@ -40,25 +35,6 @@ func renderDiff(d DiffData) string {
 	oldLine := startLine
 	newLine := startLine
 
-	if d.BlockReplace {
-		// Block replacement: show all old lines as deletions, then all new lines as additions.
-		// Used for edit_file to avoid diffmatchpatch confusion with repeated code.
-		for _, line := range strings.Split(strings.TrimRight(d.OldText, "\n"), "\n") {
-			num := diffLineNumStyle.Render(fmt.Sprintf("%4d ", oldLine))
-			sb.WriteString(num + diffRemovedStyle.Render("- "+line))
-			sb.WriteString("\n")
-			oldLine++
-		}
-		for _, line := range strings.Split(strings.TrimRight(d.NewText, "\n"), "\n") {
-			num := diffLineNumStyle.Render(fmt.Sprintf("%4d ", newLine))
-			sb.WriteString(num + diffAddedStyle.Render("+ "+line))
-			sb.WriteString("\n")
-			newLine++
-		}
-		return strings.TrimRight(sb.String(), "\n")
-	}
-
-	// Smart diff for full file changes (write_file).
 	dmp := diffmatchpatch.New()
 	a, b, lines := dmp.DiffLinesToChars(d.OldText, d.NewText)
 	diffs := dmp.DiffMain(a, b, false)
@@ -99,16 +75,18 @@ func renderDiff(d DiffData) string {
 
 		// Render all deletions first
 		for _, line := range deleted {
-			num := diffLineNumStyle.Render(fmt.Sprintf("%4d ", oldLine))
-			sb.WriteString(num + diffRemovedStyle.Render("- "+line))
-			sb.WriteString("\n")
+			num := diffRemovedLineNumStyle.Render(fmt.Sprintf("%4d ", oldLine))
+			marker := diffRemovedMarkerStyle.Render("-")
+			content := diffRemovedStyle.Render(" " + line)
+			sb.WriteString(num + marker + content + "\n")
 			oldLine++
 		}
 		// Then all additions
 		for _, line := range added {
-			num := diffLineNumStyle.Render(fmt.Sprintf("%4d ", newLine))
-			sb.WriteString(num + diffAddedStyle.Render("+ "+line))
-			sb.WriteString("\n")
+			num := diffAddedLineNumStyle.Render(fmt.Sprintf("%4d ", newLine))
+			marker := diffAddedMarkerStyle.Render("+")
+			content := diffAddedStyle.Render(" " + line)
+			sb.WriteString(num + marker + content + "\n")
 			newLine++
 		}
 	}
@@ -145,36 +123,40 @@ func parseDiffFromToolCall(toolName, args, result, workingDir string, denied boo
 	}
 
 	switch toolName {
-	case "edit_file", "write_file":
+	case "write_file":
 		var r struct {
 			FilePath   string `json:"file_path"`
-			OldString  string `json:"old_string"`
-			NewString  string `json:"new_string"`
-			OldContent string `json:"old_content"`
 			NewContent string `json:"new_content"`
-			IsNewFile  bool   `json:"is_new_file"`
 		}
 		if json.Unmarshal([]byte(result), &r) != nil || r.FilePath == "" {
 			return parseDiffFromArgs(toolName, args, workingDir)
 		}
-		old := r.OldString + r.OldContent
-		new_ := r.NewString + r.NewContent
+		return &DiffData{
+			FilePath: r.FilePath,
+			NewText:  r.NewContent,
+		}
+	case "edit_file":
+		var r struct {
+			FilePath  string `json:"file_path"`
+			OldString string `json:"old_string"`
+			NewString string `json:"new_string"`
+		}
+		if json.Unmarshal([]byte(result), &r) != nil || r.FilePath == "" {
+			return parseDiffFromArgs(toolName, args, workingDir)
+		}
 		startLine := 1
-		if toolName == "edit_file" {
-			path := r.FilePath
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(workingDir, path)
-			}
-			if data, err := os.ReadFile(path); err == nil {
-				startLine = findStartLine(string(data), r.OldString)
-			}
+		path := r.FilePath
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(workingDir, path)
+		}
+		if data, err := os.ReadFile(path); err == nil {
+			startLine = findStartLine(string(data), r.OldString)
 		}
 		return &DiffData{
-			FilePath:     r.FilePath,
-			OldText:      old,
-			NewText:      new_,
-			StartLine:    startLine,
-			BlockReplace: toolName == "edit_file",
+			FilePath:  r.FilePath,
+			OldText:   r.OldString,
+			NewText:   r.NewString,
+			StartLine: startLine,
 		}
 	}
 	return nil
@@ -200,11 +182,10 @@ func parseDiffFromArgs(name, argsJSON, workingDir string) *DiffData {
 			startLine = findStartLine(string(data), args.OldString)
 		}
 		return &DiffData{
-			FilePath:     args.FilePath,
-			OldText:      args.OldString,
-			NewText:      args.NewString,
-			StartLine:    startLine,
-			BlockReplace: true,
+			FilePath:  args.FilePath,
+			OldText:   args.OldString,
+			NewText:   args.NewString,
+			StartLine: startLine,
 		}
 
 	case "write_file":
@@ -215,19 +196,10 @@ func parseDiffFromArgs(name, argsJSON, workingDir string) *DiffData {
 		if json.Unmarshal([]byte(argsJSON), &args) != nil || args.FilePath == "" {
 			return nil
 		}
-		path := args.FilePath
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(workingDir, path)
+		return &DiffData{
+			FilePath: args.FilePath,
+			NewText:  args.Content,
 		}
-		d := &DiffData{
-			FilePath:  args.FilePath,
-			NewText:   args.Content,
-			StartLine: 1,
-		}
-		if data, err := os.ReadFile(path); err == nil {
-			d.OldText = string(data)
-		}
-		return d
 	}
 	return nil
 }

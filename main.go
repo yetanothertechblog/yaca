@@ -11,6 +11,7 @@ import (
 	"go-tui/config"
 	"go-tui/conversation"
 	"go-tui/llm"
+	"go-tui/settings"
 	"go-tui/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,9 +26,17 @@ func main() {
 		resumeID = flag.Arg(0)
 	}
 
-	if err := llm.InitAPIKey(); err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
+	s, err := settings.Load()
+	if err != nil {
+		log.Printf("failed to load settings: %v", err)
+	}
+
+	if active := s.ActiveModel(); active != "" {
+		if md := config.ModelByName(active); md != nil {
+			if key := s.APIKey(md.APIKeyName); key != "" {
+				llm.Configure(md.APIURL, key, active)
+			}
+		}
 	}
 
 	workingDir, err := os.Getwd()
@@ -51,7 +60,7 @@ func main() {
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
 	log.Println("starting go-tui")
 
-	convDir := conversation.Dir(workingDir)
+	convDir := conversation.Dir()
 	var conv *conversation.Data
 
 	if *resume && resumeID == "" {
@@ -61,8 +70,8 @@ func main() {
 			fmt.Printf("No conversations to resume.\n")
 			os.Exit(1)
 		}
-		resumeID = strings.TrimSuffix(latestFile, ".json")
-		path := filepath.Join(convDir, resumeID+".json")
+		resumeID = strings.TrimSuffix(latestFile, ".jsonl")
+		path := filepath.Join(convDir, resumeID+".jsonl")
 		conv, err = conversation.Load(path)
 		if err != nil {
 			fmt.Printf("Error loading conversation: %v\n", err)
@@ -71,7 +80,7 @@ func main() {
 		log.Printf("resumed latest conversation: %s", conv.ID)
 	} else if resumeID != "" {
 		// Explicit UUID provided: go run . -resume <uuid>
-		path := filepath.Join(convDir, resumeID+".json")
+		path := filepath.Join(convDir, resumeID+".jsonl")
 		conv, err = conversation.Load(path)
 		if err != nil {
 			fmt.Printf("Error loading conversation: %v\n", err)
@@ -84,11 +93,12 @@ func main() {
 		log.Printf("new conversation: %s", conv.ID)
 	}
 
-	m := tui.New(workingDir, conv)
+	m := tui.New(workingDir, conv, s)
 	p := tea.NewProgram(&m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
+	fmt.Printf("To resume this session run: yaca -resume %s\n", m.ConversationID())
 	m.Shutdown()
 }

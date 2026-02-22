@@ -11,8 +11,8 @@ import (
 
 // Styles are defined in theme.go
 
-func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md *MarkdownRenderer) string {
-	if len(messages) == 0 && perm == nil {
+func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md *MarkdownRenderer, streamingContent, streamingThinkingContent string) string {
+	if len(messages) == 0 && perm == nil && streamingContent == "" && streamingThinkingContent == "" {
 		return "Welcome! Type a message and press Enter to send."
 	}
 
@@ -53,9 +53,23 @@ func renderMessages(messages []ChatEntry, perm *PermissionPrompt, width int, md 
 		}
 
 		rendered = strings.Trim(rendered, "\n")
+		if rendered == "" {
+			i++
+			continue
+		}
 		sb.WriteString(rendered + "\n\n")
 
 		i++
+	}
+
+	// Thinking block: last 3 lines of accumulated thinking content
+	if strings.TrimSpace(streamingThinkingContent) != "" {
+		sb.WriteString(renderThinkingBlock(streamingThinkingContent) + "\n\n")
+	}
+
+	// In-progress streaming response — rendered through glamour where possible.
+	if streamingContent != "" {
+		sb.WriteString(renderStreamingMarkdown(streamingContent, md) + "\n\n")
 	}
 
 	// Show permission prompt inline
@@ -74,6 +88,9 @@ func renderToolCallEntry(entry ChatEntry) string {
 	bullet := toolBulletStyle.Render("⏺ ") + toolCmdStyle.Render(header)
 
 	if entry.Denied {
+		if entry.Diff != nil {
+			return bullet + "\n" + indentBlock(renderDiff(*entry.Diff)) + "\n" + indentBlock(deniedStyle.Render("User declined"))
+		}
 		return bullet + " " + deniedStyle.Render("User declined")
 	}
 
@@ -104,19 +121,34 @@ func renderToolCallEntry(entry ChatEntry) string {
 	}
 }
 
+func renderThinkingBlock(content string) string {
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	start := len(lines) - 3
+	if start < 0 {
+		start = 0
+	}
+	excerpt := thinkingContentStyle.Render(strings.Join(lines[start:], "\n"))
+	return thinkingLabelStyle.Render("Thinking…") + "\n" + excerpt
+}
+
 func renderMessageEntry(entry ChatEntry, md *MarkdownRenderer) string {
 	switch entry.Role {
 	case "user":
 		return userMessageStyle.Render("❯ " + entry.Content)
 	case "assistant":
-		return renderAssistantMessage(entry.Content, md)
+		var parts []string
+		if strings.TrimSpace(entry.ReasoningContent) != "" {
+			parts = append(parts, renderThinkingBlock(entry.ReasoningContent))
+		}
+		parts = append(parts, renderAssistantMessage(entry.Content, md))
+		return strings.Join(parts, "\n\n")
 	default:
 		return fmt.Sprintf("%s: %s", entry.Role, entry.Content)
 	}
 }
 
 func renderAssistantMessage(content string, md *MarkdownRenderer) string {
-	if md != nil && isMarkdown(content) {
+	if md != nil {
 		if r, err := md.Render(content); err == nil {
 			return r
 		}
