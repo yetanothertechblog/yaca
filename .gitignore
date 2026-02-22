@@ -5,4 +5,5 @@ log/
 tmp/
 .yaca/permissions.json
 .beads/
+.claude/
 docs/
